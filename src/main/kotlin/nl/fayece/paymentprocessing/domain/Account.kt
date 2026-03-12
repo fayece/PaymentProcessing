@@ -6,11 +6,10 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
-import nl.fayece.paymentprocessing.util.toMoney
 import java.math.BigDecimal
-import java.math.RoundingMode
-import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
+import nl.fayece.paymentprocessing.util.toMoney
 
 @Entity
 @Table(name = "accounts")
@@ -28,14 +27,14 @@ class Account(
     @Enumerated(EnumType.STRING)
     var status: AccountStatus = AccountStatus.ACTIVE,
 
-    val createdAt: Instant = Instant.now(),
+    val createdAt: OffsetDateTime = OffsetDateTime.now(),
 
     @Version
     var version: Long = 0
 ) {
     fun isActive(): Boolean = status == AccountStatus.ACTIVE
-    fun createdBefore(other: Instant): Boolean = createdAt.isBefore(other)
-    fun createdAfter(other: Instant): Boolean = createdAt.isAfter(other)
+    fun createdBefore(other: OffsetDateTime): Boolean = createdAt.isBefore(other)
+    fun createdAfter(other: OffsetDateTime): Boolean = createdAt.isAfter(other)
 
     fun debit(amount: BigDecimal) {
         val normalized = amount.toMoney()

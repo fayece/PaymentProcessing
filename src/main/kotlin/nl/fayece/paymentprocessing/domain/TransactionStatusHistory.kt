@@ -7,7 +7,7 @@ import jakarta.persistence.FetchType
 import jakarta.persistence.Id
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
-import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 @Entity
@@ -25,5 +25,5 @@ class TransactionStatusHistory(
 
     val reason: String? = null,
 
-    val changedAt: Instant = Instant.now()
+    val changedAt: OffsetDateTime = OffsetDateTime.now()
 )

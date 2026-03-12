@@ -6,5 +6,6 @@ enum class TransactionStatus {
     PENDING,
     SETTLED,
     FAILED,
-    REVERSED
+    REVERSED,
+    REFUNDED
 }

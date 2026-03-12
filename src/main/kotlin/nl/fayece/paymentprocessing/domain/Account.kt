@@ -1,5 +1,6 @@
 package nl.fayece.paymentprocessing.domain
 
+import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
@@ -10,6 +11,7 @@ import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
 import nl.fayece.paymentprocessing.util.toMoney
+import org.hibernate.annotations.NaturalId
 
 @Entity
 @Table(name = "accounts")
@@ -20,7 +22,9 @@ class Account(
 
     val name: String,
 
-    val iban: String,
+    @NaturalId
+    @Column(unique = true, nullable = false, updatable = false)
+    val iban: Iban,
 
     var balance: BigDecimal = BigDecimal.ZERO.toMoney(),
 

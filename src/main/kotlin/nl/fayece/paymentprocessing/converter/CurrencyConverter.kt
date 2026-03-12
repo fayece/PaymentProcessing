@@ -7,9 +7,6 @@ import java.util.Currency
 @Converter(autoApply = true)
 class CurrencyConverter : AttributeConverter<Currency, String> {
 
-    override fun convertToDatabaseColumn(currency: Currency): String =
-        currency.currencyCode
-
-    override fun convertToEntityAttribute(code: String): Currency =
-        Currency.getInstance(code)
+    override fun convertToDatabaseColumn(currency: Currency): String = currency.currencyCode
+    override fun convertToEntityAttribute(code: String): Currency = Currency.getInstance(code)
 }

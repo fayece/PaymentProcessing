@@ -1,7 +1,4 @@
 spring:
-  datasource:
-    url: jdbc:tc:postgresql:17.9-bookworm:///payment_processing_test
-    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
   jpa:
     hibernate:
       ddl-auto: none

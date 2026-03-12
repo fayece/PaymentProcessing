@@ -11,9 +11,9 @@ services:
     ports:
       - "8091:8090"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${DB_NAME}
-      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_URL: ${PAYPROC_URL}
+      SPRING_DATASOURCE_USERNAME: ${PAYPROC_USER}
+      SPRING_DATASOURCE_PASSWORD: ${PAYPROC_PASSWORD}
       SPRING_PROFILES_ACTIVE: prod
     depends_on:
       db:
@@ -26,13 +26,13 @@ services:
     container_name: payment-processing-db
     restart: always
     environment:
-      POSTGRES_USER: ${DB_USERNAME}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${PAYPROC_USER}
+      POSTGRES_PASSWORD: ${PAYPROC_PASSWORD}
+      POSTGRES_DB: ${PAYPROC_DB}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - payment-processing-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -d ${DB_NAME} -U ${DB_USERNAME}"]
+      test: ["CMD-SHELL", "pg_isready -d ${PAYPROC_DB} -U ${PAYPROC_USER}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -42,9 +42,12 @@ services:
   db-dev:
     extends:
       service: db
+    container_name: payment-processing-db-dev
     ports:
       - "5443:5432"
+    environment:
+      POSTGRES_AUTH_METHOD: md5
     profiles: ["dev"]
 
 volumes:
-  pgdata:
+  payment-processing-pgdata:

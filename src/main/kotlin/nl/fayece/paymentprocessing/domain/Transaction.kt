@@ -11,7 +11,7 @@ import jakarta.persistence.Version
 import nl.fayece.paymentprocessing.util.toMoney
 
 import java.math.BigDecimal
-import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.Currency
 import java.util.UUID
 
@@ -35,9 +35,9 @@ class Transaction internal constructor(
     @Enumerated(EnumType.STRING)
     var status: TransactionStatus = TransactionStatus.INITIATED,
 
-    val createdAt: Instant = Instant.now(),
+    val createdAt: OffsetDateTime = OffsetDateTime.now(),
 
-    var updatedAt: Instant = Instant.now(),
+    var updatedAt: OffsetDateTime = OffsetDateTime.now(),
 
     @Version
     var version: Long = 0
@@ -75,7 +75,7 @@ class Transaction internal constructor(
             "Cannot transition from $status to $newStatus"
         }
         status = newStatus
-        updatedAt = Instant.now()
+        updatedAt = OffsetDateTime.now()
     }
 }
 

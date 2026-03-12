@@ -3,7 +3,7 @@ package nl.fayece.paymentprocessing.domain
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
-import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 @Entity
@@ -17,7 +17,7 @@ class IdempotencyKey(
 
     val responseSnapshot: String,
 
-    val createdAt: Instant = Instant.now()
+    val createdAt: OffsetDateTime = OffsetDateTime.now()
 ) {
     fun matches(otherKey: String): Boolean = key == otherKey
 }

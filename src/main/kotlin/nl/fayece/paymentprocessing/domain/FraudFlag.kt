@@ -5,7 +5,7 @@ import jakarta.persistence.FetchType
 import jakarta.persistence.Id
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
-import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 @Entity
@@ -22,7 +22,7 @@ class FraudFlag(
 
     val reason: String,
 
-    val flaggedAt: Instant = Instant.now()
+    val flaggedAt: OffsetDateTime = OffsetDateTime.now()
 ) {
     fun describe(): String = "[$ruleName] $reason"
 }

@@ -1,36 +1,44 @@
 package nl.fayece.paymentprocessing.domain
 
-import java.math.BigInteger
-
 @JvmInline
-value class Iban(val value: String) {
-
-    init {
-        require(value.matches(IBAN_REGEX)) { "Invalid IBAN format: $value" }
-        require(passesChecksum(value)) { "Invalid IBAN checksum: $value" }
-    }
-
-    override fun toString(): String = value
+value class Iban private constructor(val value: String) {
 
     companion object {
         private val IBAN_REGEX = Regex("^NL\\d{2}[A-Z]{4}\\d{10}$")  // Dutch IBAN format only
 
-        private fun passesChecksum(iban: String): Boolean {
+        fun of(raw: String): Iban {
+            val normalized = raw.uppercase().replace(" ", "")
+            require(normalized.matches(IBAN_REGEX)) { "Invalid IBAN format: $normalized" }
+            require(passesChecksum(normalized)) { "Invalid IBAN checksum: $normalized" }
+            return Iban(normalized)
+        }
 
-            // Check validation numbers (third and fourth position)
-            val checkDigits = iban.substring(2, 4).toInt()
-            if (checkDigits !in 2..98) return false
+        private fun passesChecksum(iban: String): Boolean {
 
             // Rearrange the IBAN
             val rearranged = iban.drop(4) + iban.take(4)
 
             // Replace letters with their corresponding numbers
-            val numeric = rearranged.map { char ->
-                if (char.isLetter()) (char - 'A' + 10).toString() else char.toString()
-            }.joinToString("")
+            val numeric = buildString {
+                for (char in rearranged) {
+                    if (char.isLetter()) append(char - 'A' + 10)
+                    else append(char)
+                }
+            }
 
             // Calculate modulo 97
-            return numeric.toBigInteger().mod(97.toBigInteger()) == BigInteger.ONE
+            return mod97(numeric) == 1
+        }
+
+        private fun mod97(number: String): Int {
+            var remainder = 0
+            for (digit in number) {
+                remainder = (remainder * 10 + (digit - '0')) % 97
+            }
+
+            return remainder
         }
     }
+
+    override fun toString(): String = value
 }

@@ -8,5 +8,5 @@ import nl.fayece.paymentprocessing.domain.Iban
 class IbanConverter : AttributeConverter<Iban, String> {
 
     override fun convertToDatabaseColumn(iban: Iban): String = iban.value
-    override fun convertToEntityAttribute(value: String): Iban = Iban(value)
+    override fun convertToEntityAttribute(value: String): Iban = Iban.of(value)
 }

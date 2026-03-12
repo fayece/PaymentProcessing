@@ -1,4 +1,4 @@
-package nl.fayece.paymentprocessing.converter
+package nl.fayece.paymentprocessing.converters
 
 import jakarta.persistence.AttributeConverter
 import jakarta.persistence.Converter

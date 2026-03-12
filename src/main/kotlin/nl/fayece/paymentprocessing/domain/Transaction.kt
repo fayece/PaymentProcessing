@@ -58,6 +58,7 @@ class Transaction internal constructor(
 
     fun isTerminal(): Boolean = status == TransactionStatus.FAILED
             || status == TransactionStatus.REVERSED
+            || status == TransactionStatus.REFUNDED
 
     fun canTransitionTo(newStatus: TransactionStatus): Boolean {
         if (isTerminal()) return false
@@ -65,7 +66,7 @@ class Transaction internal constructor(
             TransactionStatus.INITIATED -> newStatus == TransactionStatus.VALIDATED || newStatus == TransactionStatus.FAILED
             TransactionStatus.VALIDATED -> newStatus == TransactionStatus.PENDING || newStatus == TransactionStatus.FAILED
             TransactionStatus.PENDING -> newStatus == TransactionStatus.SETTLED || newStatus == TransactionStatus.FAILED
-            TransactionStatus.SETTLED -> newStatus == TransactionStatus.REVERSED
+            TransactionStatus.SETTLED -> newStatus == TransactionStatus.REVERSED || newStatus == TransactionStatus.REFUNDED
             else -> false
         }
     }

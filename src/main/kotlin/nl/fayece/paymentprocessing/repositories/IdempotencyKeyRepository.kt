@@ -1,4 +1,4 @@
-package nl.fayece.paymentprocessing.repository
+package nl.fayece.paymentprocessing.repositories
 
 import nl.fayece.paymentprocessing.domain.IdempotencyKey
 import org.springframework.data.jpa.repository.JpaRepository

@@ -1,4 +1,4 @@
-package nl.fayece.paymentprocessing.exception
+package nl.fayece.paymentprocessing.exceptions
 
 import java.time.Instant
 

@@ -1,0 +1,74 @@
+### Create Alice
+POST {{baseUrl}}/api/accounts
+Content-Type: application/json
+
+{
+  "iban": "{{aliceIban}}",
+  "ownerName": "Alice",
+  "balance": {{aliceBalance}},
+  "currency": "{{currency}}"
+}
+
+### Create Bob
+POST {{baseUrl}}/api/accounts
+Content-Type: application/json
+
+{
+  "iban": "{{bobIban}}",
+  "ownerName": "Bob",
+  "balance": {{bobBalance}},
+  "currency": "{{currency}}"
+}
+
+### Submit payment
+# Expected: 201 Created
+# Body contains transactionId, status: PENDING, correct IBANs and amount
+# Alice balance: 400.00, Bob balance: 200.00
+POST {{baseUrl}}/api/payments
+Content-Type: application/json
+
+{
+  "sourceIban": "{{aliceIban}}",
+  "destinationIban": "{{bobIban}}",
+  "amount": 100.00,
+  "currency": "{{currency}}"
+}
+
+### Submit payment - insufficient funds
+# Expected: 400 Bad Request
+# Message: "Insufficient balance"
+POST {{baseUrl}}/api/payments
+Content-Type: application/json
+
+{
+  "sourceIban": "{{aliceIban}}",
+  "destinationIban": "{{bobIban}}",
+  "amount": 9999.00,
+  "currency": "{{currency}}"
+}
+
+### Submit payment - invalid IBAN
+# Expected: 400 Bad Request
+# Message: "Invalid IBAN format: INVALID"
+POST {{baseUrl}}/api/payments
+Content-Type: application/json
+
+{
+  "sourceIban": "INVALID",
+  "destinationIban": "{{bobIban}}",
+  "amount": 100.00,
+  "currency": "{{currency}}"
+}
+
+### Submit payment - same source and destination
+# Expected: 400 Bad Request
+# Message: "Source and destination accounts cannot be the same"
+POST {{baseUrl}}/api/payments
+Content-Type: application/json
+
+{
+  "sourceIban": "{{aliceIban}}",
+  "destinationIban": "{{aliceIban}}",
+  "amount": 100.00,
+  "currency": "{{currency}}"
+}

@@ -1,36 +1,57 @@
 name: "payment-processing"
 
 services:
-  server:
+  server-base:
     image: payment-processing-server
-    container_name: payment-processing-server
-    restart: unless-stopped
+    container_name: payment-processing-server-base
     build:
       context: .
       dockerfile: Dockerfile
+    profiles: [ "_base" ]
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_USERNAME: ${PAYPROC_USER}
+      SPRING_DATASOURCE_PASSWORD: ${PAYPROC_PASSWORD}
+    mem_limit: 500mb
+    cpus: 1
+
+  server:
+    extends:
+      service: server-base
+    container_name: payment-processing-server
+    profiles: [ "prod" ]
     ports:
       - "8091:8090"
     environment:
       SPRING_DATASOURCE_URL: ${PAYPROC_URL}
-      SPRING_DATASOURCE_USERNAME: ${PAYPROC_USER}
-      SPRING_DATASOURCE_PASSWORD: ${PAYPROC_PASSWORD}
       SPRING_PROFILES_ACTIVE: prod
     depends_on:
       db:
         condition: service_healthy
-    mem_limit: 500mb
-    cpus: 1
 
-  db:
+  server-dev:
+    extends:
+      service: server-base
+    container_name: payment-processing-server-dev
+    profiles: [ "dev" ]
+    ports:
+      - "8092:8090"
+    environment:
+      SPRING_DATASOURCE_URL: ${PAYPROC_URL}
+      SPRING_PROFILES_ACTIVE: dev
+    depends_on:
+      db-dev:
+        condition: service_healthy
+
+  db-base:
     image: postgres:17.9-bookworm
-    container_name: payment-processing-db
+    container_name: payment-processing-db-base
     restart: always
+    profiles: [ "_base" ]
     environment:
       POSTGRES_USER: ${PAYPROC_USER}
       POSTGRES_PASSWORD: ${PAYPROC_PASSWORD}
       POSTGRES_DB: ${PAYPROC_DB}
-    volumes:
-      - payment-processing-pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -d ${PAYPROC_DB} -U ${PAYPROC_USER}"]
       interval: 5s
@@ -39,15 +60,24 @@ services:
     mem_limit: 1g
     cpus: 1
 
+  db:
+    extends:
+      service: db-base
+    container_name: payment-processing-db
+    profiles: [ "prod" ]
+    volumes:
+      - payment-processing-pgdata:/var/lib/postgresql/data
+
   db-dev:
     extends:
-      service: db
+      service: db-base
     container_name: payment-processing-db-dev
+    profiles: [ "dev" ]
     ports:
       - "5443:5432"
-    environment:
-      POSTGRES_AUTH_METHOD: md5
-    profiles: ["dev"]
+    volumes:
+      - payment-processing-pgdata-dev:/var/lib/postgresql/data
 
 volumes:
   payment-processing-pgdata:
+  payment-processing-pgdata-dev:

@@ -30,15 +30,17 @@
         developmentOnly("org.springframework.boot:spring-boot-devtools")
         developmentOnly("org.springframework.boot:spring-boot-docker-compose")
         runtimeOnly("org.postgresql:postgresql")
+        testRuntimeOnly("org.junit.platform:junit-platform-launcher")
         testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
         testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
         testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
-        testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
-        testRuntimeOnly("org.junit.platform:junit-platform-launcher")
         testImplementation(platform("org.testcontainers:testcontainers-bom:1.20.4"))
         testImplementation("org.springframework.boot:spring-boot-testcontainers")
         testImplementation("org.testcontainers:junit-jupiter")
         testImplementation("org.testcontainers:testcontainers-postgresql")
+        testImplementation("io.mockk:mockk:1.14.9")
+        testImplementation("com.ninja-squad:springmockk:5.0.1")
+        testImplementation("org.springframework.boot:spring-boot-starter-restclient")
     }
 
     kotlin {

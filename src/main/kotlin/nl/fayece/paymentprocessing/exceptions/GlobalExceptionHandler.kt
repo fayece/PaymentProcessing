@@ -1,8 +1,10 @@
 package nl.fayece.paymentprocessing.exceptions
 
+import jakarta.persistence.EntityNotFoundException
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.orm.ObjectOptimisticLockingFailureException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 
@@ -36,6 +38,36 @@ class GlobalExceptionHandler {
                 path = request.requestURI
             )
         )
+
+    @ExceptionHandler(EntityNotFoundException::class)
+    fun handleEntityNotFound(
+        ex: EntityNotFoundException,
+        request: HttpServletRequest
+    ): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+            ErrorResponse(
+                status = HttpStatus.NOT_FOUND.value(),
+                error = HttpStatus.NOT_FOUND.reasonPhrase,
+                message = ex.message ?: "Entity not found",
+                path = request.requestURI
+            )
+        )
+
+    @ExceptionHandler(ObjectOptimisticLockingFailureException::class)
+    fun handleOptimissticLockingFailure(
+        ex: ObjectOptimisticLockingFailureException,
+        request: HttpServletRequest
+    ): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "1")
+            .body(
+                ErrorResponse(
+                    status = HttpStatus.SERVICE_UNAVAILABLE.value(),
+                    error = HttpStatus.SERVICE_UNAVAILABLE.reasonPhrase,
+                    message = ex.message ?: "Service temporarily unavailable. Please try again later.",
+                    path = request.requestURI
+                )
+            )
 
     @ExceptionHandler(Exception::class)
     fun handleException(

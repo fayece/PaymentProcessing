@@ -8,6 +8,7 @@ import jakarta.persistence.Id
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import jakarta.persistence.Version
+import nl.fayece.paymentprocessing.domain.exceptions.InvalidTransactionStateException
 import nl.fayece.paymentprocessing.util.toMoney
 
 import java.math.BigDecimal
@@ -72,9 +73,12 @@ class Transaction internal constructor(
     }
 
     fun transitionTo(newStatus: TransactionStatus) {
-        require(canTransitionTo(newStatus)) {
-            "Cannot transition from $status to $newStatus"
+        if (!canTransitionTo(newStatus)) {
+            throw InvalidTransactionStateException(
+                "Cannot transition from $status to $newStatus"
+            )
         }
+
         status = newStatus
         updatedAt = OffsetDateTime.now()
     }

@@ -7,6 +7,8 @@ spring:
     hibernate:
       ddl-auto: validate
     database-platform: org.hibernate.dialect.PostgreSQLDialect
+  jackson:
+    time-zone: UTC
   profiles:
     active: local
 

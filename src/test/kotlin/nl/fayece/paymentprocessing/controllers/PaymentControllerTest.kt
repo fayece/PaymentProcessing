@@ -5,6 +5,7 @@ import com.ninjasquad.springmockk.MockkBean
 import io.mockk.every
 import jakarta.persistence.EntityNotFoundException
 import nl.fayece.paymentprocessing.domain.*
+import nl.fayece.paymentprocessing.dto.payments.PaymentRequest
 import nl.fayece.paymentprocessing.services.PaymentService
 import nl.fayece.paymentprocessing.util.toMoney
 import org.junit.jupiter.api.Nested
@@ -86,6 +87,7 @@ class PaymentControllerTest {
                 }.andExpect {
                     status { isBadRequest() }
                     jsonPath("$.message") { exists() }
+                    jsonPath("$.fields[?(@.field == 'sourceIban')]") { isNotEmpty() }
                 }
             }
 
@@ -97,6 +99,88 @@ class PaymentControllerTest {
                 }.andExpect {
                     status { isBadRequest() }
                     jsonPath("$.message") { exists() }
+                    jsonPath("$.fields[?(@.field == 'destinationIban')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 400 when source IBAN is blank`() {
+                mockMvc.post("/api/payments") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest.copy(sourceIban = ""))
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields[?(@.field == 'sourceIban')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 400 when destination IBAN is blank`() {
+                mockMvc.post("/api/payments") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest.copy(destinationIban = ""))
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields[?(@.field == 'destinationIban')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 400 when amount is null`() {
+                mockMvc.post("/api/payments") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest.copy(amount = null))
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields[?(@.field == 'amount')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 400 when amount is zero`() {
+                mockMvc.post("/api/payments") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest.copy(amount = BigDecimal.ZERO))
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields[?(@.field == 'amount')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 400 when amount is negative`() {
+                mockMvc.post("/api/payments") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest.copy(amount = BigDecimal("-10.00")))
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields[?(@.field == 'amount')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 400 when currency is blank`() {
+                mockMvc.post("/api/payments") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest.copy(currency = ""))
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields[?(@.field == 'currency')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 400 with all field errors when multiple fields are invalid`() {
+                mockMvc.post("/api/payments") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(
+                        validRequest.copy(sourceIban = "INVALID", amount = BigDecimal.ZERO)
+                    )
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields") { isArray() }
+                    jsonPath("$.fields[?(@.field == 'sourceIban')]") { isNotEmpty() }
+                    jsonPath("$.fields[?(@.field == 'amount')]") { isNotEmpty() }
                 }
             }
 

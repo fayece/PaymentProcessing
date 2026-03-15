@@ -7,6 +7,7 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
+import nl.fayece.paymentprocessing.domain.exceptions.InsufficientBalanceException
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -42,7 +43,9 @@ class Account(
 
     fun debit(amount: BigDecimal) {
         val normalized = amount.toMoney()
-        require(balance >= normalized) { "Insufficient balance" }
+        if (balance < normalized) throw InsufficientBalanceException(
+            "Insufficient balance: available $balance, required $normalized"
+        )
         balance -= normalized
     }
 

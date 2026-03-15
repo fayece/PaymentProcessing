@@ -23,10 +23,13 @@
     dependencies {
         implementation("org.springframework.boot:spring-boot-starter-data-jpa")
         implementation("org.springframework.boot:spring-boot-starter-flyway")
+        implementation("org.springframework.boot:spring-boot-starter-validation")
         implementation("org.springframework.boot:spring-boot-starter-webmvc")
         implementation("org.flywaydb:flyway-database-postgresql")
         implementation("org.jetbrains.kotlin:kotlin-reflect")
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.10.2")
         implementation("tools.jackson.module:jackson-module-kotlin")
+        implementation("jakarta.validation:jakarta.validation-api:3.1.1")
         developmentOnly("org.springframework.boot:spring-boot-devtools")
         developmentOnly("org.springframework.boot:spring-boot-docker-compose")
         runtimeOnly("org.postgresql:postgresql")
@@ -38,7 +41,7 @@
         testImplementation("org.springframework.boot:spring-boot-testcontainers")
         testImplementation("org.testcontainers:junit-jupiter")
         testImplementation("org.testcontainers:testcontainers-postgresql")
-        testImplementation("io.mockk:mockk:1.14.9")
+        testImplementation("io.mockk:mockk:1.14.6")
         testImplementation("com.ninja-squad:springmockk:5.0.1")
         testImplementation("org.springframework.boot:spring-boot-starter-restclient")
     }

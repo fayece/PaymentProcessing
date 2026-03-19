@@ -1,6 +1,7 @@
 package nl.fayece.paymentprocessing.controllers
 
 import nl.fayece.paymentprocessing.dto.audit.AuditEntryResponse
+import nl.fayece.paymentprocessing.dto.audit.FailedPaymentResponse
 import nl.fayece.paymentprocessing.services.PaymentService
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
@@ -17,6 +18,14 @@ class AuditController(private val paymentService: PaymentService) {
     @GetMapping("/payments/{id}/history")
     @ResponseStatus(HttpStatus.OK)
     fun getPaymentHistory(@PathVariable id: UUID): List<AuditEntryResponse> {
+
         return paymentService.getTransactionHistory(id)
+    }
+
+    @GetMapping("/payments/failed")
+    @ResponseStatus(HttpStatus.OK)
+    fun getFailedPayments(): List<FailedPaymentResponse> {
+
+        return paymentService.getFailedPayments()
     }
 }

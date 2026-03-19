@@ -8,6 +8,7 @@ import nl.fayece.paymentprocessing.domain.TransactionStatus
 import nl.fayece.paymentprocessing.domain.TransactionStatusHistory
 import nl.fayece.paymentprocessing.domain.exceptions.UnauthorizedOperationException
 import nl.fayece.paymentprocessing.dto.audit.AuditEntryResponse
+import nl.fayece.paymentprocessing.dto.audit.FailedPaymentResponse
 import nl.fayece.paymentprocessing.repositories.AccountRepository
 import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
@@ -129,6 +130,11 @@ class PaymentService (
         return statusHistoryRepository.findAllByTransactionIdOrderByRecordedAtAsc(transactionId)
             .map { AuditEntryResponse.from(it) }
     }
+
+    @Transactional(readOnly = true)
+    fun getFailedPayments(): List<FailedPaymentResponse> =
+        statusHistoryRepository.findAllByStatus(TransactionStatus.FAILED)
+            .map { FailedPaymentResponse.from(it.transaction, it) }
 
     private fun transition(transaction: Transaction, status: TransactionStatus, reason: String? = null) {
         // Kept separate from recordHistory to avoid INITIATED from throwing an exception

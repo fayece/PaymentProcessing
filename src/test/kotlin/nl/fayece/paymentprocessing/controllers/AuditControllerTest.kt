@@ -9,6 +9,7 @@ import nl.fayece.paymentprocessing.domain.Iban
 import nl.fayece.paymentprocessing.domain.Transaction
 import nl.fayece.paymentprocessing.domain.TransactionStatus
 import nl.fayece.paymentprocessing.dto.audit.AuditEntryResponse
+import nl.fayece.paymentprocessing.dto.audit.FailedPaymentResponse
 import nl.fayece.paymentprocessing.services.PaymentService
 import nl.fayece.paymentprocessing.util.toMoney
 import org.junit.jupiter.api.Nested
@@ -89,6 +90,46 @@ class AuditControllerTest {
             mockMvc.get("/api/audit/payments/${nonExistingId}/history")
                 .andExpect {
                     status { isNotFound() }
+                }
+        }
+    }
+
+    @Nested
+    inner class GetFailedPayments {
+
+        @Test
+        fun `returns 200 with failed payments`() {
+
+            every { paymentService.getFailedPayments() } returns listOf(
+                FailedPaymentResponse(
+                    transactionId = UUID.randomUUID(),
+                    sourceIban = sourceIban.value,
+                    destinationIban = destinationIban.value,
+                    amount = BigDecimal("50.00").toMoney(),
+                    currency = "EUR",
+                    reason = "Insufficient funds",
+                    failedAt = OffsetDateTime.parse("2026-03-19T22:52:00Z")
+                )
+            )
+
+            mockMvc.get("/api/audit/payments/failed")
+                .andExpect {
+                    status { isOk() }
+                    jsonPath("$[0].transactionId") { exists() }
+                    jsonPath("$[0].reason") { value("Insufficient funds") }
+                    jsonPath("$[0].failedAt") { exists() }
+                }
+        }
+
+        @Test
+        fun `returns 200 with empty list when no failed payments exist`() {
+            every { paymentService.getFailedPayments() } returns emptyList()
+
+            mockMvc.get("/api/audit/payments/failed")
+                .andExpect {
+                    status { isOk() }
+                    jsonPath("$") { isArray() }
+                    jsonPath("$") { isEmpty() }
                 }
         }
     }

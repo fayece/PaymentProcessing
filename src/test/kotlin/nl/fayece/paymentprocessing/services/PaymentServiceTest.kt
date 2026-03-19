@@ -696,4 +696,35 @@ class PaymentServiceTest {
             }
         }
     }
+
+    @Nested
+    inner class GetFailedPayments {
+
+        @Test
+        fun `returns failed payments with reason`() {
+
+            val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur)
+            val failedEntry = TransactionStatusHistory(
+                transaction = transaction,
+                status = TransactionStatus.FAILED,
+                reason = "Insufficient funds"
+            )
+            every { statusHistoryRepository.findAllByStatus(TransactionStatus.FAILED) } returns listOf(failedEntry)
+
+            val result = paymentService.getFailedPayments()
+
+            assertEquals(1, result.size)
+            assertEquals(transaction.id, result[0].transactionId)
+            assertEquals("Insufficient funds", result[0].reason)
+        }
+
+        @Test
+        fun `returns empty list when no failed payments exist`() {
+            every { statusHistoryRepository.findAllByStatus(TransactionStatus.FAILED) } returns emptyList()
+
+            val result = paymentService.getFailedPayments()
+
+            assertTrue(result.isEmpty())
+        }
+    }
 }

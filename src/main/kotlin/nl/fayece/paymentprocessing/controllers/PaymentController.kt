@@ -39,4 +39,11 @@ class PaymentController(private val paymentService: PaymentService) {
     fun confirmSettlement(@PathVariable id: UUID) {
         paymentService.handleSettlementConfirmation(id)
     }
+
+    @PostMapping("/{id}/refund")
+    @ResponseStatus(HttpStatus.CREATED)
+    fun refundPayment(@PathVariable id: UUID): PaymentResponse {
+        val transaction = paymentService.refundPayment(id)
+        return PaymentResponse.from(transaction)
+    }
 }

@@ -52,6 +52,13 @@ class PaymentControllerTest {
         it.transitionTo(TransactionStatus.QUEUED)
     }
 
+    private fun settledTransaction() = Transaction.create(sourceAccount, destinationAccount, BigDecimal("100.00"), eur).also {
+        it.transitionTo(TransactionStatus.VALIDATED)
+        it.transitionTo(TransactionStatus.QUEUED)
+        it.transitionTo(TransactionStatus.PENDING)
+        it.transitionTo(TransactionStatus.SETTLED)
+    }
+
     @Nested
     inner class SubmitPayment {
 
@@ -248,6 +255,7 @@ class PaymentControllerTest {
 
         @Nested
         inner class HappyPath {
+
             @Test
             fun `returns 204 on successful settlement`() {
                 val transactionId = UUID.randomUUID()
@@ -312,7 +320,84 @@ class PaymentControllerTest {
                         header { string("Retry-After", "1") }
                     }
             }
+        }
+    }
 
+    @Nested
+    inner class RefundPayment {
+
+        @Nested
+        inner class HappyPath {
+
+            @Test
+            fun `returns 201 with refund transaction response`() {
+
+                val transactionId = UUID.randomUUID()
+                every { paymentService.refundPayment(transactionId) } returns settledTransaction()
+
+                mockMvc.post("/api/payments/$transactionId/refund") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest)
+                }.andExpect {
+                    status { isCreated() }
+                    jsonPath("$.transactionId") { exists() }
+                    jsonPath("$.sourceIban") { value(sourceIban.value) }
+                    jsonPath("$.destinationIban") { value(destinationIban.value) }
+                    jsonPath("$.amount") { value(100.00) }
+                    jsonPath("$.currency") { value("EUR") }
+                }
+            }
+        }
+
+        @Nested
+        inner class FailureHandling {
+
+            @Test
+            fun `returns 400 when transaction ID is invalid`() {
+                val invalidId = "invalid-id"
+
+                mockMvc.post("/api/payments/$invalidId/refund")
+                    .andExpect {
+                        status { isBadRequest() }
+                    }
+            }
+
+            @Test
+            fun `returns 404 when transaction is not found`() {
+                val unknownId = UUID.randomUUID()
+                every { paymentService.refundPayment(unknownId) } throws
+                        EntityNotFoundException("Transaction not found: $unknownId")
+
+                mockMvc.post("/api/payments/$unknownId/refund")
+                    .andExpect {
+                        status { isNotFound() }
+                    }
+            }
+
+            @Test
+            fun `returns 422 when transaction is not in a valid state for refund`() {
+                val transactionId = UUID.randomUUID()
+                every { paymentService.refundPayment(transactionId) } throws
+                        InvalidTransactionStateException("Transaction is not in a valid state for refund")
+
+                mockMvc.post("/api/payments/$transactionId/refund")
+                    .andExpect {
+                        status { isUnprocessableContent() }
+                    }
+            }
+
+            @Test
+            fun `returns 503 with Retry-After header on optimistic locking failure`() {
+                val transactionId = UUID.randomUUID()
+                every { paymentService.refundPayment(transactionId) } throws
+                        ObjectOptimisticLockingFailureException(Transaction::class.java, "test-id")
+
+                mockMvc.post("/api/payments/$transactionId/refund")
+                    .andExpect {
+                        status { isServiceUnavailable() }
+                        header { string("Retry-After", "1") }
+                    }
+            }
         }
     }
 }

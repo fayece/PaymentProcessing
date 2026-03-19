@@ -6,6 +6,7 @@ import nl.fayece.paymentprocessing.domain.*
 import nl.fayece.paymentprocessing.domain.exceptions.InsufficientBalanceException
 import nl.fayece.paymentprocessing.domain.exceptions.InvalidTransactionStateException
 import nl.fayece.paymentprocessing.domain.exceptions.UnauthorizedOperationException
+import nl.fayece.paymentprocessing.dto.audit.AuditEntryResponse
 import nl.fayece.paymentprocessing.repositories.AccountRepository
 import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
@@ -641,6 +642,56 @@ class PaymentServiceTest {
                         assertEquals(TransactionStatus.REFUNDED, settledTransaction.status)
                         assertFalse(capturedHistory.any { it.status == TransactionStatus.SETTLED })
                     }
+                }
+            }
+        }
+    }
+
+    @Nested
+    inner class GetTransactionHistory {
+
+        @Nested
+        inner class HappyPath {
+
+            @Test
+            fun `returns transaction history for existing transaction`() {
+                val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                    it.transitionTo(TransactionStatus.VALIDATED)
+                    it.transitionTo(TransactionStatus.QUEUED)
+                }
+                every { transactionRepository.existsById(transaction.id) } returns true
+                every { statusHistoryRepository.findAllByTransactionIdOrderByRecordedAtAsc(transaction.id) } returns listOf(
+                    TransactionStatusHistory(transaction = transaction, status = TransactionStatus.INITIATED),
+                    TransactionStatusHistory(transaction = transaction, status = TransactionStatus.VALIDATED),
+                    TransactionStatusHistory(transaction = transaction, status = TransactionStatus.QUEUED)
+                )
+
+                val history = paymentService.getTransactionHistory(transaction.id)
+
+                assertEquals(
+                    listOf(TransactionStatus.INITIATED, TransactionStatus.VALIDATED, TransactionStatus.QUEUED),
+                    history.map { it.status }
+                )
+            }
+
+            @Nested
+            inner class ErrorHandling {
+
+                @Test
+                fun `throws EntityNotFoundException for unknown transaction`() {
+                    val unknownId = UUID.randomUUID()
+                    every { transactionRepository.existsById(unknownId) } returns false
+
+                    assertThrows<EntityNotFoundException> {
+                        paymentService.getTransactionHistory(unknownId)
+                    }
+                }
+
+                @Test
+                fun `returns empty list for transaction with no history`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur)
+                    every { transactionRepository.existsById(transaction.id) } returns true
+                    every { statusHistoryRepository.findAllByTransactionIdOrderByRecordedAtAsc(transaction.id) } returns emptyList()
                 }
             }
         }

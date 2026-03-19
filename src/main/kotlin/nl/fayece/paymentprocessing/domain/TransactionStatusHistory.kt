@@ -25,5 +25,5 @@ class TransactionStatusHistory(
 
     val reason: String? = null,
 
-    var changedAt: OffsetDateTime = OffsetDateTime.now()
+    var recordedAt: OffsetDateTime = OffsetDateTime.now()
 )

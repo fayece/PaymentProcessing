@@ -7,6 +7,7 @@ import nl.fayece.paymentprocessing.domain.Transaction
 import nl.fayece.paymentprocessing.domain.TransactionStatus
 import nl.fayece.paymentprocessing.domain.TransactionStatusHistory
 import nl.fayece.paymentprocessing.domain.exceptions.UnauthorizedOperationException
+import nl.fayece.paymentprocessing.dto.audit.AuditEntryResponse
 import nl.fayece.paymentprocessing.repositories.AccountRepository
 import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
@@ -118,6 +119,15 @@ class PaymentService (
             original.currency,
             SettlementMode.IMMEDIATE
         )
+    }
+
+    @Transactional(readOnly = true)
+    fun getTransactionHistory(transactionId: UUID): List<AuditEntryResponse> {
+        if (!transactionRepository.existsById(transactionId)) {
+            throw EntityNotFoundException("Transaction not found: $transactionId")
+        }
+        return statusHistoryRepository.findAllByTransactionIdOrderByRecordedAtAsc(transactionId)
+            .map { AuditEntryResponse.from(it) }
     }
 
     private fun transition(transaction: Transaction, status: TransactionStatus, reason: String? = null) {

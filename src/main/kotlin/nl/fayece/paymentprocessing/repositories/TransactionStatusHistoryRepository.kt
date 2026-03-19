@@ -4,4 +4,6 @@ import nl.fayece.paymentprocessing.domain.TransactionStatusHistory
 import org.springframework.data.jpa.repository.JpaRepository
 import java.util.UUID
 
-interface TransactionStatusHistoryRepository : JpaRepository<TransactionStatusHistory, UUID>
+interface TransactionStatusHistoryRepository : JpaRepository<TransactionStatusHistory, UUID> {
+    fun findAllByTransactionIdOrderByRecordedAtAsc(transactionId: UUID): List<TransactionStatusHistory>
+}

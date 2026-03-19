@@ -11,6 +11,7 @@ import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
 import org.springframework.orm.ObjectOptimisticLockingFailureException
 import org.springframework.resilience.annotation.Retryable
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
@@ -47,6 +48,10 @@ class PaymentService (
             source, destination, amount, currency, SettlementMode.QUEUED
         )
     }
+
+    @Transactional(readOnly = true)
+    fun processQueuedPaymentIds(): List<UUID> =
+        transactionRepository.findAllByStatus(TransactionStatus.QUEUED).map { it.id }
 
     @Transactional
     fun advanceQueuedPaymentToPending(transactionId: UUID) {

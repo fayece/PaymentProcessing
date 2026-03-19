@@ -2,9 +2,10 @@ package nl.fayece.paymentprocessing.controllers
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.ninjasquad.springmockk.MockkBean
-import io.mockk.every
+import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
 import nl.fayece.paymentprocessing.domain.*
+import nl.fayece.paymentprocessing.domain.exceptions.InvalidTransactionStateException
 import nl.fayece.paymentprocessing.dto.payments.PaymentRequest
 import nl.fayece.paymentprocessing.services.PaymentService
 import nl.fayece.paymentprocessing.util.toMoney
@@ -18,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
 import java.math.BigDecimal
 import java.util.Currency
+import java.util.UUID
 
 @WebMvcTest(PaymentController::class)
 class PaymentControllerTest {
@@ -238,6 +240,79 @@ class PaymentControllerTest {
                     header { string("Retry-After", "1") }
                 }
             }
+        }
+    }
+
+    @Nested
+    inner class ConfirmSettlement {
+
+        @Nested
+        inner class HappyPath {
+            @Test
+            fun `returns 204 on successful settlement`() {
+                val transactionId = UUID.randomUUID()
+                every { paymentService.handleSettlementConfirmation(transactionId) } just Runs
+
+                mockMvc.post("/api/payments/$transactionId/confirm-settlement") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest)
+                }.andExpect {
+                    status { isNoContent() }
+                }
+            }
+        }
+
+        @Nested
+        inner class FailureHandling {
+
+            @Test
+            fun `returns 400 when transaction ID is invalid`() {
+                val invalidId = "invalid-id"
+
+                mockMvc.post("/api/payments/$invalidId/confirm-settlement")
+                    .andExpect {
+                        status { isBadRequest() }
+                    }
+
+            }
+
+            @Test
+            fun `returns 404 when transaction is not found`() {
+                val unknownId = UUID.randomUUID()
+                every { paymentService.handleSettlementConfirmation(unknownId) } throws
+                        EntityNotFoundException("Transaction not found: $unknownId")
+
+                mockMvc.post("/api/payments/$unknownId/confirm-settlement")
+                    .andExpect {
+                        status { isNotFound() }
+                    }
+            }
+
+            @Test
+            fun `returns 422 when transaction is not in a valid state for settlement`() {
+                val transactionId = UUID.randomUUID()
+                every { paymentService.handleSettlementConfirmation(transactionId) } throws
+                        InvalidTransactionStateException("Transaction is not in a valid state for settlement")
+
+                mockMvc.post("/api/payments/$transactionId/confirm-settlement")
+                    .andExpect {
+                        status { isUnprocessableContent() }
+                    }
+            }
+
+            @Test
+            fun `returns 503 with Retry-After header on optimistic locking failure`() {
+                val transactionId = UUID.randomUUID()
+                every { paymentService.handleSettlementConfirmation(transactionId) } throws
+                        ObjectOptimisticLockingFailureException(Transaction::class.java, "test-id")
+
+                mockMvc.post("/api/payments/$transactionId/confirm-settlement")
+                    .andExpect {
+                        status { isServiceUnavailable() }
+                        header { string("Retry-After", "1") }
+                    }
+            }
+
         }
     }
 }

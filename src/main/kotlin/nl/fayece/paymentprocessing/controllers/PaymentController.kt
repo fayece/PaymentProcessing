@@ -4,6 +4,7 @@ import jakarta.validation.Valid
 import nl.fayece.paymentprocessing.domain.Iban
 import nl.fayece.paymentprocessing.dto.payments.PaymentRequest
 import nl.fayece.paymentprocessing.dto.payments.PaymentResponse
+import nl.fayece.paymentprocessing.dto.payments.ReversePaymentRequest
 import nl.fayece.paymentprocessing.services.PaymentService
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.PathVariable
@@ -45,5 +46,13 @@ class PaymentController(private val paymentService: PaymentService) {
     fun refundPayment(@PathVariable id: UUID): PaymentResponse {
         val transaction = paymentService.refundPayment(id)
         return PaymentResponse.from(transaction)
+    }
+
+    @PostMapping("/{id}/reverse")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun reversePayment(@PathVariable id: UUID,
+                       @Valid @RequestBody request: ReversePaymentRequest) {
+        val args = request.toArgs()
+        paymentService.reversePayment(id, args.requesterIban)
     }
 }

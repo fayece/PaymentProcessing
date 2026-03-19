@@ -20,11 +20,12 @@ class PaymentController(private val paymentService: PaymentService) {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     fun submitPayment(@Valid @RequestBody request: PaymentRequest): PaymentResponse {
+        val args = request.toArgs()
         val transaction = paymentService.submitPayment(
-            sourceIban = Iban.of(request.sourceIban),
-            destinationIban = Iban.of(request.destinationIban),
-            amount = request.amount,
-            currency = Currency.getInstance(request.currency)
+            sourceIban = args.sourceIban,
+            destinationIban = args.destinationIban,
+            amount = args.amount,
+            currency = args.currency
         )
 
         return PaymentResponse.from(transaction)

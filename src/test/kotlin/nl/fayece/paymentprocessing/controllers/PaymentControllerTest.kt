@@ -45,9 +45,9 @@ class PaymentControllerTest {
         currency = eur.currencyCode
     )
 
-    private fun pendingTransaction() = Transaction.create(sourceAccount, destinationAccount, BigDecimal("100.00"), eur).also {
+    private fun queuedTransaction() = Transaction.create(sourceAccount, destinationAccount, BigDecimal("100.00"), eur).also {
         it.transitionTo(TransactionStatus.VALIDATED)
-        it.transitionTo(TransactionStatus.PENDING)
+        it.transitionTo(TransactionStatus.QUEUED)
     }
 
     @Nested
@@ -58,7 +58,7 @@ class PaymentControllerTest {
 
             @Test
             fun `returns 201 with transaction response`() {
-                every { paymentService.submitPayment(any(), any(), any(), any())} returns pendingTransaction()
+                every { paymentService.submitPayment(any(), any(), any(), any())} returns queuedTransaction()
 
                 mockMvc.post("/api/payments") {
                     contentType = MediaType.APPLICATION_JSON
@@ -70,7 +70,7 @@ class PaymentControllerTest {
                     jsonPath("$.destinationIban") { value(destinationIban.value) }
                     jsonPath("$.amount") { value(100.00) }
                     jsonPath("$.currency") { value("EUR") }
-                    jsonPath("$.status") { value("PENDING") }
+                    jsonPath("$.status") { value("QUEUED") }
                     jsonPath("$.createdAt") { exists() }
                 }
             }
@@ -127,9 +127,18 @@ class PaymentControllerTest {
 
             @Test
             fun `returns 400 when amount is null`() {
+                val requestWithNullAmount = """
+                    {
+                        "sourceIban": "${validRequest.sourceIban}",
+                        "destinationIban": "${validRequest.destinationIban}",
+                        "amount": null,
+                        "currency": "${validRequest.currency}"
+                    }
+                """.trimIndent()
+
                 mockMvc.post("/api/payments") {
                     contentType = MediaType.APPLICATION_JSON
-                    content = objectMapper.writeValueAsString(validRequest.copy(amount = null))
+                    content = requestWithNullAmount
                 }.andExpect {
                     status { isBadRequest() }
                     jsonPath("$.fields[?(@.field == 'amount')]") { isNotEmpty() }

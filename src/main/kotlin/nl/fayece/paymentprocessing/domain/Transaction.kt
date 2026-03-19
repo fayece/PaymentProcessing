@@ -65,7 +65,8 @@ class Transaction internal constructor(
         if (isTerminal()) return false
         return when (status) {
             TransactionStatus.INITIATED -> newStatus == TransactionStatus.VALIDATED || newStatus == TransactionStatus.FAILED
-            TransactionStatus.VALIDATED -> newStatus == TransactionStatus.PENDING || newStatus == TransactionStatus.FAILED
+            TransactionStatus.VALIDATED -> newStatus == TransactionStatus.QUEUED || newStatus == TransactionStatus.FAILED
+            TransactionStatus.QUEUED -> newStatus == TransactionStatus.PENDING || newStatus == TransactionStatus.FAILED
             TransactionStatus.PENDING -> newStatus == TransactionStatus.SETTLED || newStatus == TransactionStatus.FAILED
             TransactionStatus.SETTLED -> newStatus == TransactionStatus.REVERSED || newStatus == TransactionStatus.REFUNDED
             else -> false

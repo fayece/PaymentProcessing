@@ -75,11 +75,11 @@ class PaymentIT: IntegrationTest() {
         inner class HappyPath {
 
             @Test
-            fun `returns 201 and transaction reaches PENDING`() {
+            fun `returns 201 and transaction reaches QUEUED`() {
                 val response = postPayment(validPayload())
 
                 assert(response.statusCode == HttpStatus.CREATED)
-                assert(response.body?.get("status") == "PENDING")
+                assert(response.body?.get("status") == "QUEUED")
                 assert(response.body?.get("transactionId") != null)
                 assert(response.body?.get("createdAt") != null)
             }
@@ -112,7 +112,7 @@ class PaymentIT: IntegrationTest() {
                 assert(history == listOf(
                     TransactionStatus.INITIATED,
                     TransactionStatus.VALIDATED,
-                    TransactionStatus.PENDING
+                    TransactionStatus.QUEUED
                 ))
             }
         }
@@ -142,10 +142,10 @@ class PaymentIT: IntegrationTest() {
             }
 
             @Test
-            fun `returns 400 for insufficient funds`() {
+            fun `returns 422 for insufficient funds`() {
                 val response = postPayment(validPayload(amount = "9999.00"))
 
-                assert(response.statusCode == HttpStatus.BAD_REQUEST)
+                assert(response.statusCode == HttpStatus.UNPROCESSABLE_CONTENT)
             }
 
             @Test

@@ -1,5 +1,6 @@
 package nl.fayece.paymentprocessing.domain
 
+import nl.fayece.paymentprocessing.domain.exceptions.InvalidIbanException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.assertThrows
@@ -35,22 +36,22 @@ class IbanTest {
     inner class Validation {
         @Test
         fun `IBAN with invalid format is rejected`() {
-            assertThrows<IllegalArgumentException> { Iban.of("INVALID") }
+            assertThrows<InvalidIbanException> { Iban.of("INVALID") }
         }
 
         @Test
         fun `IBAN with invalid check digits is rejected`() {
-            assertThrows<IllegalArgumentException> { Iban.of("NL00TEST0123456789")}
+            assertThrows<InvalidIbanException> { Iban.of("NL00TEST0123456789")}
         }
 
         @Test
         fun `IBAN with invalid checksum is rejected`() {
-            assertThrows<IllegalArgumentException> { Iban.of("NL13TEST0123456780") }
+            assertThrows<InvalidIbanException> { Iban.of("NL13TEST0123456780") }
         }
 
         @Test
         fun `Non-Dutch IBAN is rejected`() {
-            assertThrows<IllegalArgumentException> { Iban.of("US12345678901234567890") }
+            assertThrows<InvalidIbanException> { Iban.of("US12345678901234567890") }
         }
     }
 }

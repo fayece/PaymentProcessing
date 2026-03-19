@@ -1,6 +1,7 @@
 package nl.fayece.paymentprocessing.services
 
 import jakarta.persistence.EntityNotFoundException
+import nl.fayece.paymentprocessing.domain.Account
 import nl.fayece.paymentprocessing.domain.Iban
 import nl.fayece.paymentprocessing.domain.Transaction
 import nl.fayece.paymentprocessing.domain.TransactionStatus
@@ -28,7 +29,6 @@ class PaymentService (
         delay = 50,
         multiplier = 2.0
     )
-
     @Transactional
     fun submitPayment(sourceIban: Iban, destinationIban: Iban, amount: BigDecimal, currency: Currency): Transaction {
 
@@ -43,31 +43,17 @@ class PaymentService (
         require(source.isActive()) { "Source account is not active" }
         require(destination.isActive()) { "Destination account is not active" }
 
-        val transaction = transactionRepository.save(
-            Transaction.create(source, destination, amount, currency)
+        return createAndSettleTransaction(
+            source, destination, amount, currency, SettlementMode.QUEUED
         )
-        recordHistory(transaction, TransactionStatus.INITIATED)
+    }
 
-        try {
-            transaction.transitionTo(TransactionStatus.VALIDATED)
-            recordHistory(transaction, TransactionStatus.VALIDATED)
+    @Transactional
+    fun advanceQueuedPaymentToPending(transactionId: UUID) {
+        val transaction = transactionRepository.findById(transactionId)
+            .orElseThrow { EntityNotFoundException("Transaction not found: $transactionId") }
 
-            source.debit(amount)
-            destination.credit(amount)
-            accountRepository.saveAll(listOf(source, destination))
-
-            transaction.transitionTo(TransactionStatus.PENDING)
-            recordHistory(transaction, TransactionStatus.PENDING)
-
-        } catch (e: Exception) {
-            if (e is ObjectOptimisticLockingFailureException) throw e
-
-            transaction.transitionTo(TransactionStatus.FAILED)
-            recordHistory(transaction, TransactionStatus.FAILED, e.message)
-            throw e
-        }
-
-        return transactionRepository.save(transaction)
+        transition(transaction, TransactionStatus.PENDING)
     }
 
     @Transactional
@@ -75,8 +61,58 @@ class PaymentService (
         val transaction = transactionRepository.findById(transactionId)
             .orElseThrow { EntityNotFoundException("Transaction not found: $transactionId") }
 
-        transaction.transitionTo(TransactionStatus.SETTLED)
-        recordHistory(transaction, TransactionStatus.SETTLED)
+        transition(transaction, TransactionStatus.SETTLED)
+    }
+
+    @Retryable(
+        includes = [ObjectOptimisticLockingFailureException::class],
+        maxRetries = 3,
+        delay = 50,
+        multiplier = 2.0
+    )
+    @Transactional
+    fun reversePayment(transactionId: UUID) {
+
+        val transaction = transactionRepository.findById(transactionId)
+            .orElseThrow { EntityNotFoundException("Transaction not found: $transactionId") }
+
+        val source = transaction.sourceAccount
+        val destination = transaction.destinationAccount
+
+        source.credit(transaction.amount)
+        destination.debit(transaction.amount)
+        accountRepository.saveAll(listOf(source, destination))
+
+        transition(transaction, TransactionStatus.REVERSED)
+    }
+
+    @Retryable(
+        includes = [ObjectOptimisticLockingFailureException::class],
+        maxRetries = 3,
+        delay = 50,
+        multiplier = 2.0
+    )
+    @Transactional
+    fun refundPayment(transactionId: UUID): Transaction {
+
+        val original = transactionRepository.findById(transactionId)
+            .orElseThrow { EntityNotFoundException("Transaction not found: $transactionId") }
+
+        transition(original, TransactionStatus.REFUNDED)
+
+        return createAndSettleTransaction(
+            original.destinationAccount,
+            original.sourceAccount,
+            original.amount,
+            original.currency,
+            SettlementMode.IMMEDIATE
+        )
+    }
+
+    private fun transition(transaction: Transaction, status: TransactionStatus, reason: String? = null) {
+        // Kept separate from recordHistory to avoid INITIATED from throwing an exception
+        transaction.transitionTo(status)
+        recordHistory(transaction, status, reason)
     }
 
     private fun recordHistory(transaction: Transaction, status: TransactionStatus, reason: String? = null) {
@@ -86,4 +122,35 @@ class PaymentService (
             reason = reason)
         )
     }
+
+    private fun createAndSettleTransaction(source: Account, destination: Account, amount: BigDecimal, currency: Currency, settlementMode: SettlementMode): Transaction {
+        val transaction = transactionRepository.save(
+            Transaction.create(source, destination, amount, currency)
+        )
+        recordHistory(transaction, TransactionStatus.INITIATED)
+
+        try {
+            transition(transaction, TransactionStatus.VALIDATED)
+
+            source.debit(amount)
+            destination.credit(amount)
+            accountRepository.saveAll(listOf(source, destination))
+
+            transition(transaction, TransactionStatus.QUEUED)
+
+            if (settlementMode == SettlementMode.IMMEDIATE) {
+                transition(transaction, TransactionStatus.PENDING)
+                transition(transaction, TransactionStatus.SETTLED)
+            }
+        } catch (e: Exception) {
+            if (e is ObjectOptimisticLockingFailureException) throw e
+
+            transition(transaction, TransactionStatus.FAILED, e.message)
+            throw e
+        }
+
+        return transactionRepository.save(transaction)
+    }
 }
+
+enum class SettlementMode { QUEUED, IMMEDIATE }

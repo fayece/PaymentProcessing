@@ -3,6 +3,8 @@ package nl.fayece.paymentprocessing.services
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
 import nl.fayece.paymentprocessing.domain.*
+import nl.fayece.paymentprocessing.domain.exceptions.InsufficientBalanceException
+import nl.fayece.paymentprocessing.domain.exceptions.InvalidTransactionStateException
 import nl.fayece.paymentprocessing.repositories.AccountRepository
 import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
@@ -39,7 +41,7 @@ class PaymentServiceTest {
 
         paymentService = PaymentService(accountRepository, transactionRepository, statusHistoryRepository)
 
-        sourceAccount = Account(name = "Alice", iban = sourceIban, balance = BigDecimal("500.00").toMoney())
+        sourceAccount = Account(name = "Alice", iban = sourceIban, balance = BigDecimal("550.00").toMoney())
         destinationAccount = Account(name = "Bob", iban = destinationIban, balance = BigDecimal("100.00").toMoney())
 
         every { accountRepository.findByIban(sourceIban) } returns Optional.of(sourceAccount)
@@ -61,7 +63,7 @@ class PaymentServiceTest {
             fun `debits source account`() {
                 paymentService.submitPayment(sourceIban, destinationIban, BigDecimal("200.00"), eur)
 
-                assertEquals(BigDecimal("300.00").toMoney(), sourceAccount.balance)
+                assertEquals(BigDecimal("350.00").toMoney(), sourceAccount.balance)
             }
 
             @Test
@@ -72,18 +74,18 @@ class PaymentServiceTest {
             }
 
             @Test
-            fun `returns transaction in PENDING state`() {
+            fun `returns transaction in QUEUED state`() {
                 val transaction = paymentService.submitPayment(sourceIban, destinationIban, BigDecimal("50.00"), eur)
 
-                assertEquals(TransactionStatus.PENDING, transaction.status)
+                assertEquals(TransactionStatus.QUEUED, transaction.status)
             }
 
             @Test
-            fun `records INITIATED, VALIDATED, PENDING history entries in order`() {
+            fun `records INITIATED, VALIDATED, QUEUED history entries in order`() {
                 paymentService.submitPayment(sourceIban, destinationIban, BigDecimal("50.00"), eur)
 
                 assertEquals(
-                    listOf(TransactionStatus.INITIATED, TransactionStatus.VALIDATED, TransactionStatus.PENDING),
+                    listOf(TransactionStatus.INITIATED, TransactionStatus.VALIDATED, TransactionStatus.QUEUED),
                     capturedHistory.map { it.status }
                 )
             }
@@ -144,7 +146,7 @@ class PaymentServiceTest {
 
             @Test
             fun `transitions to FAILED and records reason on insufficient funds`() {
-                assertThrows<IllegalArgumentException> {
+                assertThrows<InsufficientBalanceException> {
                     paymentService.submitPayment(sourceIban, destinationIban, BigDecimal("9999.00"), eur)
                 }
 
@@ -168,49 +170,460 @@ class PaymentServiceTest {
     }
 
     @Nested
-    inner class HandleSettlementConfirmation {
+    inner class PaymentStateTransitions {
 
         @Nested
-        inner class HappyPath {
+        inner class FromInitiated {
 
-            @Test
-            fun `transitions transaction to SETTLED`() {
-                val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
-                    it.transitionTo(TransactionStatus.VALIDATED)
-                    it.transitionTo(TransactionStatus.PENDING)
+            @Nested
+            inner class ToValidated {
+
+                @Test
+                fun `records VALIDATED history entry after INITIATED`() {
+                    paymentService.submitPayment(sourceIban, destinationIban, BigDecimal("50.00"), eur)
+
+                    val statuses = capturedHistory.map { it.status }
+                    val initiatedIndex = statuses.indexOf(TransactionStatus.INITIATED)
+                    val validatedIndex = statuses.indexOf(TransactionStatus.VALIDATED)
+
+                    assertTrue(validatedIndex > initiatedIndex)
                 }
 
-                every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+                @Test
+                fun `transaction is VALIDATED before balance mutation occurs`() {
+                    paymentService.submitPayment(sourceIban, destinationIban, BigDecimal("50.00"), eur)
 
-                paymentService.handleSettlementConfirmation(transaction.id)
-
-                assertEquals(TransactionStatus.SETTLED, transaction.status)
+                    assertTrue(capturedHistory.any { it.status == TransactionStatus.VALIDATED })
+                }
             }
 
-            @Test
-            fun `records SETTLED history entry`() {
-                val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
-                    it.transitionTo(TransactionStatus.VALIDATED)
-                    it.transitionTo(TransactionStatus.PENDING)
+            @Nested
+            inner class ToFailed {
+
+                @Test
+                fun `records INITIATED, VALIDATED, FAILED history entries in order when saveAll throws`() {
+                    every { accountRepository.saveAll(any<List<Account>>()) } throws RuntimeException("Test exception")
+
+                    assertThrows<RuntimeException> {
+                        paymentService.submitPayment(sourceIban, destinationIban, BigDecimal("50.00"), eur)
+                    }
+
+                    assertEquals(
+                        listOf(TransactionStatus.INITIATED, TransactionStatus.VALIDATED, TransactionStatus.FAILED),
+                        capturedHistory.map { it.status }
+                    )
                 }
-                every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
-
-                paymentService.handleSettlementConfirmation(transaction.id)
-
-                assertTrue(capturedHistory.any { it.status == TransactionStatus.SETTLED })
             }
         }
 
         @Nested
-        inner class FailureHandling {
+        inner class FromValidated {
 
-            @Test
-            fun `throws EntityNotFoundException for unknown transaction`() {
-                val unknownId = UUID.randomUUID()
-                every { transactionRepository.findById(unknownId) } returns Optional.empty()
+            @Nested
+            inner class ToQueued {
 
-                assertThrows<EntityNotFoundException> {
-                    paymentService.handleSettlementConfirmation(unknownId)
+                @Test
+                fun `records FAILED after VALIDATED on insufficient funds`() {
+                    assertThrows<InsufficientBalanceException> {
+                        paymentService.submitPayment(sourceIban, destinationIban,
+                            BigDecimal(Integer.MAX_VALUE.toString()), eur
+                        )
+                    }
+
+                    val statuses = capturedHistory.map { it.status }
+                    assertEquals(
+                        listOf(TransactionStatus.INITIATED, TransactionStatus.VALIDATED, TransactionStatus.FAILED),
+                        statuses
+                    )
+                }
+            }
+
+            @Nested
+            inner class ToFailed {
+
+                @Test
+                fun `records failure reason on insufficient funds`() {
+                    assertThrows<InsufficientBalanceException> {
+                        paymentService.submitPayment(sourceIban, destinationIban,
+                            BigDecimal(Integer.MAX_VALUE.toString()), eur
+                        )
+                    }
+
+                    assertNotNull(capturedHistory.last().reason)
+                }
+            }
+        }
+
+        @Nested
+        inner class FromQueued {
+            @Nested
+            inner class ToPending {
+
+                @Test
+                fun `transitions transaction to PENDING`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                    }
+
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    paymentService.advanceQueuedPaymentToPending(transaction.id)
+
+                    assertEquals(TransactionStatus.PENDING, transaction.status)
+                }
+
+                @Test
+                fun `records PENDING history entry`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                    }
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    paymentService.advanceQueuedPaymentToPending(transaction.id)
+
+                    assertTrue(capturedHistory.any { it.status == TransactionStatus.PENDING })
+                }
+
+                @Test
+                fun `throws EntityNotFoundException for unknown transaction`() {
+                    val unknownId = UUID.randomUUID()
+                    every { transactionRepository.findById(unknownId) } returns Optional.empty()
+
+                    assertThrows<EntityNotFoundException> {
+                        paymentService.advanceQueuedPaymentToPending(unknownId)
+                    }
+                }
+            }
+
+            @Nested
+            inner class ToFailed {
+
+                @Test
+                fun `throws InvalidTransactionStateException when transaction is not in QUEUED state`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                        it.transitionTo(TransactionStatus.FAILED)
+                    }
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    assertThrows<InvalidTransactionStateException> {
+                        paymentService.advanceQueuedPaymentToPending(transaction.id)
+                    }
+                }
+
+                @Test
+                fun `does not record additional history when advancing a FAILED transaction`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                        it.transitionTo(TransactionStatus.FAILED)
+                    }
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    assertThrows<InvalidTransactionStateException> {
+                        paymentService.advanceQueuedPaymentToPending(transaction.id)
+                    }
+
+                    assertFalse(capturedHistory.any { it.status == TransactionStatus.PENDING })
+                }
+            }
+        }
+
+        @Nested
+        inner class FromPending {
+
+            @Nested
+            inner class ToSettled {
+
+                @Test
+                fun `transitions transaction to SETTLED`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                        it.transitionTo(TransactionStatus.PENDING)
+                    }
+
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    paymentService.handleSettlementConfirmation(transaction.id)
+
+                    assertEquals(TransactionStatus.SETTLED, transaction.status)
+                }
+
+                @Test
+                fun `records SETTLED history entry`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                        it.transitionTo(TransactionStatus.PENDING)
+                    }
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    paymentService.handleSettlementConfirmation(transaction.id)
+
+                    assertTrue(capturedHistory.any { it.status == TransactionStatus.SETTLED })
+                }
+
+                @Test
+                fun `throws EntityNotFoundException for unknown transaction`() {
+                    val unknownId = UUID.randomUUID()
+                    every { transactionRepository.findById(unknownId) } returns Optional.empty()
+
+                    assertThrows<EntityNotFoundException> {
+                        paymentService.handleSettlementConfirmation(unknownId)
+                    }
+                }
+
+                @Test
+                fun `throws InvalidTransactionStateException when transaction is not in PENDING state`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                    }
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    assertThrows<InvalidTransactionStateException> {
+                        paymentService.handleSettlementConfirmation(transaction.id)
+                    }
+                }
+            }
+
+            @Nested
+            inner class ToFailed {
+
+                @Test
+                fun `throws InvalidTransactionStateException when transaction is not in PENDING state`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                        it.transitionTo(TransactionStatus.PENDING)
+                        it.transitionTo(TransactionStatus.FAILED)
+                    }
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    assertThrows<InvalidTransactionStateException> {
+                        paymentService.handleSettlementConfirmation(transaction.id)
+                    }
+                }
+
+                @Test
+                fun `does not record SETTLED history when confirming settlement on a FAILED transaction`() {
+                    val transaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                        it.transitionTo(TransactionStatus.VALIDATED)
+                        it.transitionTo(TransactionStatus.QUEUED)
+                        it.transitionTo(TransactionStatus.PENDING)
+                        it.transitionTo(TransactionStatus.FAILED)
+                    }
+                    every { transactionRepository.findById(transaction.id) } returns Optional.of(transaction)
+
+                    assertThrows<InvalidTransactionStateException> {
+                        paymentService.handleSettlementConfirmation(transaction.id)
+                    }
+
+                    assertFalse(capturedHistory.any { it.status == TransactionStatus.SETTLED })
+                }
+            }
+        }
+
+        @Nested
+        inner class FromSettled {
+
+            private lateinit var settledTransaction: Transaction
+
+            @BeforeEach
+            fun setupSettledTransaction() {
+                settledTransaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                    it.transitionTo(TransactionStatus.VALIDATED)
+                    it.transitionTo(TransactionStatus.QUEUED)
+                    it.transitionTo(TransactionStatus.PENDING)
+                    it.transitionTo(TransactionStatus.SETTLED)
+                }
+                every { transactionRepository.findById(settledTransaction.id) } returns Optional.of(settledTransaction)
+            }
+
+            @Nested
+            inner class ToReversed {
+
+                @Nested
+                inner class HappyPath {
+
+                    @Test
+                    fun `transitions transaction to REVERSED`() {
+                        paymentService.reversePayment(settledTransaction.id)
+
+                        assertEquals(TransactionStatus.REVERSED, settledTransaction.status)
+                    }
+
+                    @Test
+                    fun `records REVERSED history entry`() {
+                        paymentService.reversePayment(settledTransaction.id)
+
+                        assertTrue(capturedHistory.any { it.status == TransactionStatus.REVERSED })
+                    }
+
+                    @Test
+                    fun `credits source account`() {
+                        paymentService.reversePayment(settledTransaction.id)
+
+                        assertEquals(BigDecimal("600.00").toMoney(), sourceAccount.balance)
+                    }
+
+                    @Test
+                    fun `debits destination account`() {
+                        paymentService.reversePayment(settledTransaction.id)
+
+                        assertEquals(BigDecimal("50.00").toMoney(), destinationAccount.balance)
+                    }
+
+                    @Test
+                    fun `persists both accounts after balance update`() {
+                        paymentService.reversePayment(settledTransaction.id)
+
+                        verify { accountRepository.saveAll(listOf(sourceAccount, destinationAccount)) }
+                    }
+                }
+
+                @Nested
+                inner class FailureHandling {
+
+                    @Test
+                    fun `throws EntityNotFoundException for unknown transaction`() {
+                        val unknownId = UUID.randomUUID()
+                        every { transactionRepository.findById(unknownId) } returns Optional.empty()
+
+                        assertThrows<EntityNotFoundException> {
+                            paymentService.reversePayment(unknownId)
+                        }
+                    }
+
+                    @Test
+                    fun `throws InvalidTransactionStateException when transaction is not in SETTLED state`() {
+                        val queuedTransaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                            it.transitionTo(TransactionStatus.VALIDATED)
+                            it.transitionTo(TransactionStatus.QUEUED)
+                        }
+                        every { transactionRepository.findById(queuedTransaction.id) } returns Optional.of(queuedTransaction)
+
+                        assertThrows<InvalidTransactionStateException> {
+                            paymentService.reversePayment(queuedTransaction.id)
+                        }
+                    }
+                }
+            }
+
+            @Nested
+            inner class ToRefunded {
+
+                @Nested
+                inner class HappyPath {
+
+                    @Test
+                    fun `transitions transaction to REFUNDED`() {
+                        paymentService.refundPayment(settledTransaction.id)
+
+                        assertEquals(TransactionStatus.REFUNDED, settledTransaction.status)
+                    }
+
+                    @Test
+                    fun `returns refund transaction in SETTLED state`() {
+                        val refund = paymentService.refundPayment(settledTransaction.id)
+
+                        assertEquals(TransactionStatus.SETTLED, refund.status)
+                    }
+
+                    @Test
+                    fun `refund transaction has swapped source and destination`() {
+                        val refund = paymentService.refundPayment(settledTransaction.id)
+
+                        assertEquals(destinationAccount, refund.sourceAccount)
+                        assertEquals(sourceAccount, refund.destinationAccount)
+                    }
+
+                    @Test
+                    fun `records REFUNDED on original then full lifecycle on refund transaction`() {
+                        paymentService.refundPayment(settledTransaction.id)
+
+                        assertEquals(
+                            listOf(
+                                TransactionStatus.REFUNDED,
+                                TransactionStatus.INITIATED,
+                                TransactionStatus.VALIDATED,
+                                TransactionStatus.QUEUED,
+                                TransactionStatus.PENDING,
+                                TransactionStatus.SETTLED
+                            ),
+                            capturedHistory.map { it.status }
+                        )
+                    }
+
+                    @Test
+                    fun `credits original source account`() {
+                        paymentService.refundPayment(settledTransaction.id)
+
+                        assertEquals(BigDecimal("600.00").toMoney(), sourceAccount.balance)
+                    }
+
+                    @Test
+                    fun `debits original destination account`() {
+                        paymentService.refundPayment(settledTransaction.id)
+
+                        assertEquals(BigDecimal("50.00").toMoney(), destinationAccount.balance)
+                    }
+                }
+
+                @Nested
+                inner class FailureHandling {
+
+                    @Test
+                    fun `throws EntityNotFoundException for unknown transaction`() {
+                        val unknownId = UUID.randomUUID()
+                        every { transactionRepository.findById(unknownId) } returns Optional.empty()
+
+                        assertThrows<EntityNotFoundException> {
+                            paymentService.refundPayment(unknownId)
+                        }
+                    }
+
+                    @Test
+                    fun `throws InvalidTransactionStateException when transaction is not SETTLED`() {
+                        val queuedTransaction = Transaction.create(sourceAccount, destinationAccount, BigDecimal("50.00"), eur).also {
+                            it.transitionTo(TransactionStatus.VALIDATED)
+                            it.transitionTo(TransactionStatus.QUEUED)
+                        }
+                        every { transactionRepository.findById(queuedTransaction.id) } returns Optional.of(queuedTransaction)
+
+                        assertThrows<InvalidTransactionStateException> {
+                            paymentService.refundPayment(queuedTransaction.id)
+                        }
+                    }
+
+                    @Test
+                    fun `transitions refund transaction to FAILED and records reason when saveAll throws`() {
+                        every { accountRepository.saveAll(any<List<Account>>()) } throws RuntimeException("Test exception")
+
+                        assertThrows<RuntimeException> {
+                            paymentService.refundPayment(settledTransaction.id)
+                        }
+
+                        val last = capturedHistory.last()
+                        assertEquals(TransactionStatus.FAILED, last.status)
+                        assertNotNull(last.reason)
+                    }
+
+                    @Test
+                    fun `does not transition original to REFUNDED when refund transaction fails`() {
+                        every { accountRepository.saveAll(any<List<Account>>()) } throws RuntimeException("Test exception")
+
+                        assertThrows<RuntimeException> {
+                            paymentService.refundPayment(settledTransaction.id)
+                        }
+
+                        assertEquals(TransactionStatus.REFUNDED, settledTransaction.status)
+                        assertFalse(capturedHistory.any { it.status == TransactionStatus.SETTLED })
+                    }
                 }
             }
         }

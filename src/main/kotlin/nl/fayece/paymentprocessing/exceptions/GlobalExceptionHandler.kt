@@ -12,6 +12,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
@@ -80,9 +81,20 @@ class GlobalExceptionHandler {
         )
     }
 
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun handleTypeMismatch(
+        request: HttpServletRequest
+    ): ResponseEntity<ErrorResponse> = ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+        ErrorResponse(
+            status = HttpStatus.BAD_REQUEST.value(),
+            error = HttpStatus.BAD_REQUEST.reasonPhrase,
+            message = "Invalid type for request parameter",
+            path = request.requestURI
+        )
+    )
+
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun handleUnreadableMessage(
-        ex: HttpMessageNotReadableException,
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
@@ -96,14 +108,13 @@ class GlobalExceptionHandler {
 
     @ExceptionHandler(NoSuchElementException::class)
     fun handleNotFound(
-        ex: NoSuchElementException,
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(
             ErrorResponse(
                 status = HttpStatus.NOT_FOUND.value(),
                 error = HttpStatus.NOT_FOUND.reasonPhrase,
-                message = ex.message ?: "Resource not found",
+                message = "Resource not found",
                 path = request.requestURI
             )
         )
@@ -154,7 +165,6 @@ class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception::class)
     fun handleException(
-        ex: Exception,
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(

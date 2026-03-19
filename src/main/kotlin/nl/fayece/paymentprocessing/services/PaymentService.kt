@@ -6,6 +6,7 @@ import nl.fayece.paymentprocessing.domain.Iban
 import nl.fayece.paymentprocessing.domain.Transaction
 import nl.fayece.paymentprocessing.domain.TransactionStatus
 import nl.fayece.paymentprocessing.domain.TransactionStatusHistory
+import nl.fayece.paymentprocessing.domain.exceptions.UnauthorizedOperationException
 import nl.fayece.paymentprocessing.repositories.AccountRepository
 import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
@@ -76,10 +77,15 @@ class PaymentService (
         multiplier = 2.0
     )
     @Transactional
-    fun reversePayment(transactionId: UUID) {
+    fun reversePayment(transactionId: UUID, requesterIban: Iban) {
 
         val transaction = transactionRepository.findById(transactionId)
             .orElseThrow { EntityNotFoundException("Transaction not found: $transactionId") }
+
+        // TODO: Replace with proper authorization once security is implemented
+        if (transaction.sourceAccount.iban != requesterIban) {
+            throw UnauthorizedOperationException("Only the requester can reverse a payment")
+        }
 
         val source = transaction.sourceAccount
         val destination = transaction.destinationAccount

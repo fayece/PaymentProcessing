@@ -6,7 +6,9 @@ import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
 import nl.fayece.paymentprocessing.domain.*
 import nl.fayece.paymentprocessing.domain.exceptions.InvalidTransactionStateException
+import nl.fayece.paymentprocessing.domain.exceptions.UnauthorizedOperationException
 import nl.fayece.paymentprocessing.dto.payments.PaymentRequest
+import nl.fayece.paymentprocessing.dto.payments.ReversePaymentRequest
 import nl.fayece.paymentprocessing.services.PaymentService
 import nl.fayece.paymentprocessing.util.toMoney
 import org.junit.jupiter.api.Nested
@@ -397,6 +399,125 @@ class PaymentControllerTest {
                         status { isServiceUnavailable() }
                         header { string("Retry-After", "1") }
                     }
+            }
+        }
+    }
+
+    @Nested
+    inner class ReversePayment {
+
+        private val validReverseRequest = ReversePaymentRequest(requesterIban = sourceIban.value)
+
+        @Nested
+        inner class HappyPath {
+
+            @Test
+            fun `returns 204 on successful reversal`() {
+
+                val transactionId = UUID.randomUUID()
+                val iban = validReverseRequest.toArgs().requesterIban
+                every { paymentService.reversePayment(transactionId, iban) } just Runs
+
+                mockMvc.post("/api/payments/$transactionId/reverse") {
+
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest)
+                }.andExpect {
+                    status { isNoContent() }
+                }
+            }
+        }
+
+        @Nested
+        inner class FailureHandling {
+
+            @Test
+            fun `returns 400 when transaction ID is invalid`() {
+                val invalidId = "invalid-id"
+
+                mockMvc.post("/api/payments/$invalidId/reverse")
+                    .andExpect {
+                        status { isBadRequest() }
+                    }
+            }
+
+            @Test
+            fun `returns 400 when requester IBAN is blank`() {
+                mockMvc.post("/api/payments/${UUID.randomUUID()}/reverse") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest.copy(requesterIban = ""))
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields[?(@.field == 'requesterIban')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 400 when requester IBAN is invalid`() {
+                mockMvc.post("/api/payments/${UUID.randomUUID()}/reverse") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest.copy(requesterIban = "INVALID"))
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.fields[?(@.field == 'requesterIban')]") { isNotEmpty() }
+                }
+            }
+
+            @Test
+            fun `returns 403 when requester is not the source account owner`() {
+                val transactionId = UUID.randomUUID()
+                every { paymentService.reversePayment(transactionId, sourceIban) } throws
+                        UnauthorizedOperationException("Only the owner of the source account can request a reversal")
+
+                mockMvc.post("/api/payments/$transactionId/reverse") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest)
+                }.andExpect {
+                    status { isForbidden() }
+                }
+            }
+
+            @Test
+            fun `returns 404 when transaction is not found`() {
+                val unknownId = UUID.randomUUID()
+                every { paymentService.reversePayment(unknownId, sourceIban) } throws
+                        EntityNotFoundException("Transaction not found: $unknownId")
+
+                mockMvc.post("/api/payments/$unknownId/reverse") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest)
+                }.andExpect {
+                    status { isNotFound() }
+                }
+            }
+
+            @Test
+            fun `returns 422 when transaction is not in a valid state for reversal`() {
+                val transactionId = UUID.randomUUID()
+                every { paymentService.reversePayment(transactionId, sourceIban) } throws
+                        InvalidTransactionStateException("Transaction is not in a valid state for reversal")
+
+                mockMvc.post("/api/payments/$transactionId/reverse") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest)
+                }.andExpect {
+                    status { isUnprocessableContent() }
+                }
+            }
+
+            @Test
+            fun `returns 503 with Retry-After header on optimistic locking failure`() {
+                val transactionId = UUID.randomUUID()
+                every { paymentService.reversePayment(transactionId, sourceIban) } throws
+                        ObjectOptimisticLockingFailureException(Transaction::class.java, "test-id")
+
+                mockMvc.post("/api/payments/$transactionId/reverse") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest)
+                }.andExpect {
+                    status { isServiceUnavailable() }
+                    header { string("Retry-After", "1") }
+                }
             }
         }
     }

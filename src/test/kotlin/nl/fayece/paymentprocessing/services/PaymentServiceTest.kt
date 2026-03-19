@@ -5,6 +5,7 @@ import jakarta.persistence.EntityNotFoundException
 import nl.fayece.paymentprocessing.domain.*
 import nl.fayece.paymentprocessing.domain.exceptions.InsufficientBalanceException
 import nl.fayece.paymentprocessing.domain.exceptions.InvalidTransactionStateException
+import nl.fayece.paymentprocessing.domain.exceptions.UnauthorizedOperationException
 import nl.fayece.paymentprocessing.repositories.AccountRepository
 import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
@@ -452,35 +453,35 @@ class PaymentServiceTest {
 
                     @Test
                     fun `transitions transaction to REVERSED`() {
-                        paymentService.reversePayment(settledTransaction.id)
+                        paymentService.reversePayment(settledTransaction.id, sourceIban)
 
                         assertEquals(TransactionStatus.REVERSED, settledTransaction.status)
                     }
 
                     @Test
                     fun `records REVERSED history entry`() {
-                        paymentService.reversePayment(settledTransaction.id)
+                        paymentService.reversePayment(settledTransaction.id, sourceIban)
 
                         assertTrue(capturedHistory.any { it.status == TransactionStatus.REVERSED })
                     }
 
                     @Test
                     fun `credits source account`() {
-                        paymentService.reversePayment(settledTransaction.id)
+                        paymentService.reversePayment(settledTransaction.id, sourceIban)
 
                         assertEquals(BigDecimal("600.00").toMoney(), sourceAccount.balance)
                     }
 
                     @Test
                     fun `debits destination account`() {
-                        paymentService.reversePayment(settledTransaction.id)
+                        paymentService.reversePayment(settledTransaction.id, sourceIban)
 
                         assertEquals(BigDecimal("50.00").toMoney(), destinationAccount.balance)
                     }
 
                     @Test
                     fun `persists both accounts after balance update`() {
-                        paymentService.reversePayment(settledTransaction.id)
+                        paymentService.reversePayment(settledTransaction.id, sourceIban)
 
                         verify { accountRepository.saveAll(listOf(sourceAccount, destinationAccount)) }
                     }
@@ -495,7 +496,7 @@ class PaymentServiceTest {
                         every { transactionRepository.findById(unknownId) } returns Optional.empty()
 
                         assertThrows<EntityNotFoundException> {
-                            paymentService.reversePayment(unknownId)
+                            paymentService.reversePayment(unknownId, sourceIban)
                         }
                     }
 
@@ -508,8 +509,24 @@ class PaymentServiceTest {
                         every { transactionRepository.findById(queuedTransaction.id) } returns Optional.of(queuedTransaction)
 
                         assertThrows<InvalidTransactionStateException> {
-                            paymentService.reversePayment(queuedTransaction.id)
+                            paymentService.reversePayment(queuedTransaction.id, sourceIban)
                         }
+                    }
+
+                    @Test
+                    fun `throws UnauthorizedOperationException when requester is not the source account owner`() {
+                        assertThrows<UnauthorizedOperationException> {
+                            paymentService.reversePayment(settledTransaction.id, destinationIban)
+                        }
+                    }
+
+                    @Test
+                    fun `does not record history when ownership check fails`() {
+                        assertThrows<UnauthorizedOperationException> {
+                            paymentService.reversePayment(settledTransaction.id, destinationIban)
+                        }
+
+                        assertFalse(capturedHistory.any { it.status == TransactionStatus.REVERSED })
                     }
                 }
             }

@@ -8,6 +8,7 @@ import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
 import nl.fayece.paymentprocessing.util.toMoney
 import nl.fayece.paymentprocessing.domain.Account
+import nl.fayece.paymentprocessing.repositories.IdempotencyKeyRepository
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
@@ -18,8 +19,9 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import java.math.BigDecimal
+import java.util.UUID
 
-class PaymentIT: IntegrationTest() {
+class PaymentIT() : IntegrationTest() {
 
     @Autowired
     lateinit var restTemplate: TestRestTemplate
@@ -33,6 +35,9 @@ class PaymentIT: IntegrationTest() {
     @Autowired
     lateinit var statusHistoryRepository: TransactionStatusHistoryRepository
 
+    @Autowired
+    lateinit var idempotencyKeyRepository: IdempotencyKeyRepository
+
     private val sourceIban = Iban.of("NL13TEST0123456789")
     private val destinationIban = Iban.of("NL65TEST0987656789")
 
@@ -40,6 +45,7 @@ class PaymentIT: IntegrationTest() {
     fun setup() {
         statusHistoryRepository.deleteAll()
         transactionRepository.deleteAll()
+        idempotencyKeyRepository.deleteAll()
         accountRepository.deleteAll()
 
         accountRepository.saveAll(listOf(
@@ -48,9 +54,11 @@ class PaymentIT: IntegrationTest() {
         ))
     }
 
-    private fun postPayment(body: String) = restTemplate.postForEntity(
+    private fun postPayment(body: String, idempotencyKey: String = UUID.randomUUID().toString()) = restTemplate.postForEntity(
         "/api/payments",
-        HttpEntity(body, HttpHeaders().apply { contentType = MediaType.APPLICATION_JSON }),
+        HttpEntity(body, HttpHeaders().apply {
+            set("Idempotency-Key", idempotencyKey)
+            contentType = MediaType.APPLICATION_JSON }),
         Map::class.java
     )
 
@@ -77,6 +85,9 @@ class PaymentIT: IntegrationTest() {
             @Test
             fun `returns 201 and transaction reaches QUEUED`() {
                 val response = postPayment(validPayload())
+
+                println("Status: ${response.statusCode}")
+                println("Body: ${response.body}")
 
                 assert(response.statusCode == HttpStatus.CREATED)
                 assert(response.body?.get("status") == "QUEUED")
@@ -114,6 +125,45 @@ class PaymentIT: IntegrationTest() {
                     TransactionStatus.VALIDATED,
                     TransactionStatus.QUEUED
                 ))
+            }
+        }
+
+        @Nested
+        inner class Idempotency {
+
+            @Test
+            fun `returns 400 when idempotency key is missing`() {
+                val response = restTemplate.postForEntity(
+                    "/api/payments",
+                    HttpEntity(validPayload(), HttpHeaders().apply { contentType = MediaType.APPLICATION_JSON }),
+                    Map::class.java
+                )
+
+                assert(response.statusCode == HttpStatus.BAD_REQUEST)
+            }
+
+            @Test
+            fun `duplicate submission returns same response without creating second transaction`() {
+                val key = UUID.randomUUID().toString()
+
+                val first = postPayment(validPayload(), idempotencyKey = key)
+                val second = postPayment(validPayload(), idempotencyKey = key)
+
+                assert(first.statusCode == HttpStatus.CREATED)
+                assert(second.statusCode == HttpStatus.CREATED)
+                assert(first.body?.get("transactionId") == second.body?.get("transactionId"))
+                assert(transactionRepository.count() == 1L)  // Check that only one transaction was created
+            }
+
+            @Test
+            fun `duplicate submission does not debit source account twice`() {
+                val key = UUID.randomUUID().toString()
+
+                postPayment(validPayload(), idempotencyKey = key)
+                postPayment(validPayload(), idempotencyKey = key)
+
+                val source = accountRepository.findByIban(sourceIban).get()
+                assert(source.balance == BigDecimal("400.00").toMoney())
             }
         }
 

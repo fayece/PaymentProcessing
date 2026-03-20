@@ -8,9 +8,12 @@ import nl.fayece.paymentprocessing.domain.*
 import nl.fayece.paymentprocessing.domain.exceptions.InvalidTransactionStateException
 import nl.fayece.paymentprocessing.domain.exceptions.UnauthorizedOperationException
 import nl.fayece.paymentprocessing.dto.payments.PaymentRequest
+import nl.fayece.paymentprocessing.dto.payments.PaymentResponse
 import nl.fayece.paymentprocessing.dto.payments.ReversePaymentRequest
+import nl.fayece.paymentprocessing.services.IdempotencyService
 import nl.fayece.paymentprocessing.services.PaymentService
 import nl.fayece.paymentprocessing.util.toMoney
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -32,12 +35,15 @@ class PaymentControllerTest {
     @MockkBean
     lateinit var paymentService: PaymentService
 
+    @MockkBean
+    lateinit var idempotencyService: IdempotencyService
+
     private val objectMapper = ObjectMapper().findAndRegisterModules()
 
     private val eur = Currency.getInstance("EUR")
     private val sourceIban = Iban.of("NL13TEST0123456789")
     private val destinationIban = Iban.of("NL65TEST0987656789")
-
+    private val idempotencyKey = "test-idempotency-key"
 
     private val sourceAccount = Account(name = "Alice", iban = sourceIban, balance = BigDecimal("500.00").toMoney())
     private val destinationAccount = Account(name = "Bob", iban = destinationIban, balance = BigDecimal("100.00").toMoney())
@@ -61,6 +67,19 @@ class PaymentControllerTest {
         it.transitionTo(TransactionStatus.SETTLED)
     }
 
+    @BeforeEach
+    fun setupIdempotencyInit() {
+
+        every { idempotencyService.resolve(
+            eq(idempotencyKey), any(), eq(PaymentResponse::class.java), any<() -> PaymentResponse>()) } answers {
+            @Suppress("UNCHECKED_CAST")
+            (args[3] as () -> PaymentResponse).invoke()
+        }
+
+        every { idempotencyService.exists(any()) } returns false
+        every { idempotencyService.record(any(), any()) } just Runs
+    }
+
     @Nested
     inner class SubmitPayment {
 
@@ -72,6 +91,7 @@ class PaymentControllerTest {
                 every { paymentService.submitPayment(any(), any(), any(), any())} returns queuedTransaction()
 
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest)
                 }.andExpect {
@@ -88,11 +108,45 @@ class PaymentControllerTest {
         }
 
         @Nested
+        inner class Idempotency {
+
+            @Test
+            fun `returns 400 when idempotency key is missing`() {
+                mockMvc.post("/api/payments") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest)
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.message") { value("Required header 'Idempotency-Key' is missing") }
+                }
+            }
+
+            @Test
+            fun `returns cached response on duplicate key without reprocessing`() {
+                val cachedResponse = PaymentResponse.from(queuedTransaction())
+                every { idempotencyService.resolve(
+                    eq(idempotencyKey), any(), PaymentResponse::class.java, any<() -> PaymentResponse>()) } returns cachedResponse
+
+                mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest)
+                }.andExpect {
+                    status { isCreated() }
+                    jsonPath("$.transactionId") { value(cachedResponse.transactionId.toString()) }
+                }
+
+                verify(exactly = 0) { paymentService.submitPayment(any(), any(), any(), any()) }
+            }
+        }
+
+        @Nested
         inner class Validation {
 
             @Test
             fun `returns 400 when source IBAN format is invalid`() {
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest.copy(sourceIban = "INVALID"))
                 }.andExpect {
@@ -105,6 +159,7 @@ class PaymentControllerTest {
             @Test
             fun `returns 400 when destination IBAN format is invalid`() {
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest.copy(destinationIban = "INVALID"))
                 }.andExpect {
@@ -117,6 +172,7 @@ class PaymentControllerTest {
             @Test
             fun `returns 400 when source IBAN is blank`() {
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest.copy(sourceIban = ""))
                 }.andExpect {
@@ -128,6 +184,7 @@ class PaymentControllerTest {
             @Test
             fun `returns 400 when destination IBAN is blank`() {
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest.copy(destinationIban = ""))
                 }.andExpect {
@@ -148,6 +205,7 @@ class PaymentControllerTest {
                 """.trimIndent()
 
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = requestWithNullAmount
                 }.andExpect {
@@ -159,6 +217,7 @@ class PaymentControllerTest {
             @Test
             fun `returns 400 when amount is zero`() {
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest.copy(amount = BigDecimal.ZERO))
                 }.andExpect {
@@ -170,6 +229,7 @@ class PaymentControllerTest {
             @Test
             fun `returns 400 when amount is negative`() {
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest.copy(amount = BigDecimal("-10.00")))
                 }.andExpect {
@@ -181,6 +241,7 @@ class PaymentControllerTest {
             @Test
             fun `returns 400 when currency is blank`() {
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest.copy(currency = ""))
                 }.andExpect {
@@ -192,6 +253,7 @@ class PaymentControllerTest {
             @Test
             fun `returns 400 with all field errors when multiple fields are invalid`() {
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(
                         validRequest.copy(sourceIban = "INVALID", amount = BigDecimal.ZERO)
@@ -210,6 +272,7 @@ class PaymentControllerTest {
                         IllegalArgumentException("Payment amount must be positive")
 
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest)
                 }.andExpect {
@@ -224,6 +287,7 @@ class PaymentControllerTest {
                         EntityNotFoundException("Account not found: ${sourceIban.value}")
 
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest)
                 }.andExpect {
@@ -242,6 +306,7 @@ class PaymentControllerTest {
                         ObjectOptimisticLockingFailureException(Account::class.java, "test-id")
 
                 mockMvc.post("/api/payments") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest)
                 }.andExpect {
@@ -264,11 +329,43 @@ class PaymentControllerTest {
                 every { paymentService.handleSettlementConfirmation(transactionId) } just Runs
 
                 mockMvc.post("/api/payments/$transactionId/confirm-settlement") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest)
                 }.andExpect {
                     status { isNoContent() }
                 }
+            }
+        }
+
+        @Nested
+        inner class Idempotency {
+
+            @Test
+            fun `returns 400 when idempotency key is missing`() {
+                val transactionId = UUID.randomUUID()
+
+                mockMvc.post("/api/payments/$transactionId/confirm-settlement") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest)
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.message") { value("Required header 'Idempotency-Key' is missing") }
+                }
+            }
+
+            @Test
+            fun `returns 204 on duplicate key without reprocessing`() {
+                val transactionId = UUID.randomUUID()
+                every { idempotencyService.exists(idempotencyKey) } returns true
+
+                mockMvc.post("/api/payments/$transactionId/confirm-settlement") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isNoContent() }
+                }
+
+                verify(exactly = 0) { paymentService.handleSettlementConfirmation(any()) }
             }
         }
 
@@ -279,10 +376,11 @@ class PaymentControllerTest {
             fun `returns 400 when transaction ID is invalid`() {
                 val invalidId = "invalid-id"
 
-                mockMvc.post("/api/payments/$invalidId/confirm-settlement")
-                    .andExpect {
-                        status { isBadRequest() }
-                    }
+                mockMvc.post("/api/payments/$invalidId/confirm-settlement") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isBadRequest() }
+                }
 
             }
 
@@ -292,10 +390,11 @@ class PaymentControllerTest {
                 every { paymentService.handleSettlementConfirmation(unknownId) } throws
                         EntityNotFoundException("Transaction not found: $unknownId")
 
-                mockMvc.post("/api/payments/$unknownId/confirm-settlement")
-                    .andExpect {
-                        status { isNotFound() }
-                    }
+                mockMvc.post("/api/payments/$unknownId/confirm-settlement") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isNotFound() }
+                }
             }
 
             @Test
@@ -304,10 +403,11 @@ class PaymentControllerTest {
                 every { paymentService.handleSettlementConfirmation(transactionId) } throws
                         InvalidTransactionStateException("Transaction is not in a valid state for settlement")
 
-                mockMvc.post("/api/payments/$transactionId/confirm-settlement")
-                    .andExpect {
-                        status { isUnprocessableContent() }
-                    }
+                mockMvc.post("/api/payments/$transactionId/confirm-settlement") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isUnprocessableContent() }
+                }
             }
 
             @Test
@@ -316,11 +416,12 @@ class PaymentControllerTest {
                 every { paymentService.handleSettlementConfirmation(transactionId) } throws
                         ObjectOptimisticLockingFailureException(Transaction::class.java, "test-id")
 
-                mockMvc.post("/api/payments/$transactionId/confirm-settlement")
-                    .andExpect {
-                        status { isServiceUnavailable() }
-                        header { string("Retry-After", "1") }
-                    }
+                mockMvc.post("/api/payments/$transactionId/confirm-settlement") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isServiceUnavailable() }
+                    header { string("Retry-After", "1") }
+                }
             }
         }
     }
@@ -338,6 +439,7 @@ class PaymentControllerTest {
                 every { paymentService.refundPayment(transactionId) } returns settledTransaction()
 
                 mockMvc.post("/api/payments/$transactionId/refund") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validRequest)
                 }.andExpect {
@@ -352,16 +454,54 @@ class PaymentControllerTest {
         }
 
         @Nested
+        inner class Idempotency {
+
+            @Test
+            fun `returns 400 when idempotency key is missing`() {
+                val transactionId = UUID.randomUUID()
+
+                mockMvc.post("/api/payments/$transactionId/refund") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest)
+                }.andExpect {
+                    status { isBadRequest() }
+                    jsonPath("$.message") { value("Required header 'Idempotency-Key' is missing") }
+                }
+            }
+
+            @Test
+            fun `returns cached response on duplicate key without reprocessing`() {
+                val transactionId = UUID.randomUUID()
+                val cachedResponse = PaymentResponse.from(settledTransaction())
+                every { idempotencyService.resolve(
+                    eq(idempotencyKey), transactionId, PaymentResponse::class.java, any<() -> PaymentResponse>()
+                ) } returns cachedResponse
+
+                mockMvc.post("/api/payments/$transactionId/refund") {
+                    header("Idempotency-Key", idempotencyKey)
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validRequest)
+                }.andExpect {
+                    status { isCreated() }
+                    jsonPath("$.transactionId") { value(cachedResponse.transactionId.toString()) }
+                }
+
+                verify(exactly = 0) { paymentService.refundPayment(any()) }
+            }
+        }
+
+        @Nested
         inner class FailureHandling {
 
             @Test
             fun `returns 400 when transaction ID is invalid`() {
                 val invalidId = "invalid-id"
 
-                mockMvc.post("/api/payments/$invalidId/refund")
-                    .andExpect {
-                        status { isBadRequest() }
-                    }
+                mockMvc.post("/api/payments/$invalidId/refund") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isBadRequest() }
+                }
             }
 
             @Test
@@ -370,10 +510,11 @@ class PaymentControllerTest {
                 every { paymentService.refundPayment(unknownId) } throws
                         EntityNotFoundException("Transaction not found: $unknownId")
 
-                mockMvc.post("/api/payments/$unknownId/refund")
-                    .andExpect {
-                        status { isNotFound() }
-                    }
+                mockMvc.post("/api/payments/$unknownId/refund") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isNotFound() }
+                }
             }
 
             @Test
@@ -382,10 +523,11 @@ class PaymentControllerTest {
                 every { paymentService.refundPayment(transactionId) } throws
                         InvalidTransactionStateException("Transaction is not in a valid state for refund")
 
-                mockMvc.post("/api/payments/$transactionId/refund")
-                    .andExpect {
-                        status { isUnprocessableContent() }
-                    }
+                mockMvc.post("/api/payments/$transactionId/refund") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isUnprocessableContent() }
+                }
             }
 
             @Test
@@ -394,11 +536,12 @@ class PaymentControllerTest {
                 every { paymentService.refundPayment(transactionId) } throws
                         ObjectOptimisticLockingFailureException(Transaction::class.java, "test-id")
 
-                mockMvc.post("/api/payments/$transactionId/refund")
-                    .andExpect {
-                        status { isServiceUnavailable() }
-                        header { string("Retry-After", "1") }
-                    }
+                mockMvc.post("/api/payments/$transactionId/refund") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isServiceUnavailable() }
+                    header { string("Retry-After", "1") }
+                }
             }
         }
     }
@@ -419,12 +562,42 @@ class PaymentControllerTest {
                 every { paymentService.reversePayment(transactionId, iban) } just Runs
 
                 mockMvc.post("/api/payments/$transactionId/reverse") {
-
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validReverseRequest)
                 }.andExpect {
                     status { isNoContent() }
                 }
+            }
+        }
+
+        @Nested
+        inner class Idempotency {
+
+            @Test
+            fun `returns 400 when Idempotency-Key header is missing`() {
+                mockMvc.post("/api/payments/${UUID.randomUUID()}/reverse") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest)
+                }.andExpect {
+                    status { isBadRequest() }
+                }
+            }
+
+            @Test
+            fun `returns 204 on duplicate key without reprocessing`() {
+                val transactionId = UUID.randomUUID()
+                every { idempotencyService.exists(idempotencyKey) } returns true
+
+                mockMvc.post("/api/payments/$transactionId/reverse") {
+                    header("Idempotency-Key", idempotencyKey)
+                    contentType = MediaType.APPLICATION_JSON
+                    content = objectMapper.writeValueAsString(validReverseRequest)
+                }.andExpect {
+                    status { isNoContent() }
+                }
+
+                verify(exactly = 0) { paymentService.reversePayment(any(), any()) }
             }
         }
 
@@ -435,15 +608,17 @@ class PaymentControllerTest {
             fun `returns 400 when transaction ID is invalid`() {
                 val invalidId = "invalid-id"
 
-                mockMvc.post("/api/payments/$invalidId/reverse")
-                    .andExpect {
-                        status { isBadRequest() }
-                    }
+                mockMvc.post("/api/payments/$invalidId/reverse") {
+                    header("Idempotency-Key", idempotencyKey)
+                }.andExpect {
+                    status { isBadRequest() }
+                }
             }
 
             @Test
             fun `returns 400 when requester IBAN is blank`() {
                 mockMvc.post("/api/payments/${UUID.randomUUID()}/reverse") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validReverseRequest.copy(requesterIban = ""))
                 }.andExpect {
@@ -455,6 +630,7 @@ class PaymentControllerTest {
             @Test
             fun `returns 400 when requester IBAN is invalid`() {
                 mockMvc.post("/api/payments/${UUID.randomUUID()}/reverse") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validReverseRequest.copy(requesterIban = "INVALID"))
                 }.andExpect {
@@ -470,6 +646,7 @@ class PaymentControllerTest {
                         UnauthorizedOperationException("Only the owner of the source account can request a reversal")
 
                 mockMvc.post("/api/payments/$transactionId/reverse") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validReverseRequest)
                 }.andExpect {
@@ -484,6 +661,7 @@ class PaymentControllerTest {
                         EntityNotFoundException("Transaction not found: $unknownId")
 
                 mockMvc.post("/api/payments/$unknownId/reverse") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validReverseRequest)
                 }.andExpect {
@@ -498,6 +676,7 @@ class PaymentControllerTest {
                         InvalidTransactionStateException("Transaction is not in a valid state for reversal")
 
                 mockMvc.post("/api/payments/$transactionId/reverse") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validReverseRequest)
                 }.andExpect {
@@ -512,6 +691,7 @@ class PaymentControllerTest {
                         ObjectOptimisticLockingFailureException(Transaction::class.java, "test-id")
 
                 mockMvc.post("/api/payments/$transactionId/reverse") {
+                    header("Idempotency-Key", idempotencyKey)
                     contentType = MediaType.APPLICATION_JSON
                     content = objectMapper.writeValueAsString(validReverseRequest)
                 }.andExpect {

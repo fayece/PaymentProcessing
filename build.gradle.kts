@@ -4,6 +4,7 @@
         kotlin("plugin.jpa") version "2.2.21"
         id("org.springframework.boot") version "4.0.3"
         id("io.spring.dependency-management") version "1.1.7"
+        id("io.swagger.core.v3.swagger-gradle-plugin") version "2.2.45"
     }
 
     group = "nl.fayece"
@@ -30,6 +31,7 @@
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.10.2")
         implementation("tools.jackson.module:jackson-module-kotlin")
         implementation("jakarta.validation:jakarta.validation-api:3.1.1")
+        implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.2")
         developmentOnly("org.springframework.boot:spring-boot-devtools")
         developmentOnly("org.springframework.boot:spring-boot-docker-compose")
         runtimeOnly("org.postgresql:postgresql")

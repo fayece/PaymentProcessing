@@ -11,13 +11,19 @@ A payment processing backend exploring the core concepts in financial systems: p
 - Payment lifecycle with idempotency
 - Domain modeling and validation
 - Full controller, service, and integration test coverage
+- Azure deployment
 
 **In Progress**
 - Fraud flagging
 - Event system
-- Azure deployment
 
-## Running the project locally
+## API Documentation
+The API documentation can be obtained in two ways:
+
+### Direct link via Azure
+https://payment-processing-server.yellowrock-ae6fb545.germanywestcentral.azurecontainerapps.io/swagger-ui/index.html
+
+### Running the project locally
 **Requires Docker to be installed. Ensure Docker is running, and you are running a terminal in the project root directory.**
 ```bash
 cp .env.example .env

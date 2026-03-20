@@ -32,8 +32,6 @@ class AuditControllerTest {
     @MockkBean
     lateinit var paymentService: PaymentService
 
-    private val objectMapper = ObjectMapper().findAndRegisterModules()
-
     private val eur = Currency.getInstance("EUR")
     private val sourceIban = Iban.of("NL13TEST0123456789")
     private val destinationIban = Iban.of("NL65TEST0987656789")

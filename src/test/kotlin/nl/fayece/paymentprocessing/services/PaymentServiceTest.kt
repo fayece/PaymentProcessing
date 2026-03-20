@@ -27,6 +27,7 @@ class PaymentServiceTest {
     private val accountRepository: AccountRepository = mockk()
     private val transactionRepository: TransactionRepository = mockk()
     private val statusHistoryRepository: TransactionStatusHistoryRepository = mockk()
+    private val transactionHistoryWriter: TransactionHistoryWriter = mockk()
     private lateinit var paymentService: PaymentService
 
     private val eur = Currency.getInstance("EUR")
@@ -41,7 +42,7 @@ class PaymentServiceTest {
     fun setup() {
         capturedHistory.clear()
 
-        paymentService = PaymentService(accountRepository, transactionRepository, statusHistoryRepository)
+        paymentService = PaymentService(accountRepository, transactionRepository, statusHistoryRepository, transactionHistoryWriter)
 
         sourceAccount = Account(name = "Alice", iban = sourceIban, balance = BigDecimal("550.00").toMoney())
         destinationAccount = Account(name = "Bob", iban = destinationIban, balance = BigDecimal("100.00").toMoney())
@@ -51,9 +52,17 @@ class PaymentServiceTest {
         every { accountRepository.saveAll(any<List<Account>>()) } returns listOf(sourceAccount, destinationAccount)
         every { transactionRepository.save(any()) } answers { firstArg() }
         every { statusHistoryRepository.save(capture(capturedHistory)) } answers { firstArg() }
-    }
 
-    // submitPayment
+        every { transactionHistoryWriter.recordFailure(any(), any()) } answers {
+            val transaction = args[0] as Transaction
+            val reason = args[1] as String?
+            capturedHistory.add(TransactionStatusHistory(
+                transaction = transaction,
+                status = TransactionStatus.FAILED,
+                reason = reason
+            ))
+        }
+    }
 
     @Nested
     inner class SubmitPayment {

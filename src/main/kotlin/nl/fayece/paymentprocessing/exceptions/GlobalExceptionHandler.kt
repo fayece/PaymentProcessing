@@ -6,11 +6,13 @@ import nl.fayece.paymentprocessing.domain.exceptions.InsufficientBalanceExceptio
 import nl.fayece.paymentprocessing.domain.exceptions.InvalidIbanException
 import nl.fayece.paymentprocessing.domain.exceptions.InvalidTransactionStateException
 import nl.fayece.paymentprocessing.domain.exceptions.UnauthorizedOperationException
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.orm.ObjectOptimisticLockingFailureException
 import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.web.bind.MissingRequestHeaderException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
@@ -18,176 +20,75 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RestControllerAdvice
 class GlobalExceptionHandler {
 
+    private val logger = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
+
     @ExceptionHandler(InvalidTransactionStateException::class)
-    fun handleInvalidTransactionState(
-        ex: InvalidTransactionStateException,
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(
-            ErrorResponse(
-                status = HttpStatus.UNPROCESSABLE_CONTENT.value(),
-                error = HttpStatus.UNPROCESSABLE_CONTENT.reasonPhrase,
-                message = ex.message ?: "Invalid transaction state transition",
-                path = request.requestURI
-            )
-        )
+    fun handleInvalidTransactionState(ex: InvalidTransactionStateException, request: HttpServletRequest) =
+        error(HttpStatus.UNPROCESSABLE_CONTENT, ex.message ?: "Invalid transaction state transition", request)
 
     @ExceptionHandler(InsufficientBalanceException::class)
-    fun handleInsufficientBalance(
-        ex: InsufficientBalanceException,
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(
-            ErrorResponse(
-                status = HttpStatus.UNPROCESSABLE_CONTENT.value(),
-                error = HttpStatus.UNPROCESSABLE_CONTENT.reasonPhrase,
-                message = ex.message ?: "Insufficient balance",
-                path = request.requestURI
-            )
-        )
+    fun handleInsufficientBalance(ex: InsufficientBalanceException, request: HttpServletRequest) =
+        error(HttpStatus.UNPROCESSABLE_CONTENT, ex.message ?: "Insufficient balance", request)
 
     @ExceptionHandler(InvalidIbanException::class)
-    fun handleInvalidIban(
-        ex: InvalidIbanException,
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-            ErrorResponse(
-                status = HttpStatus.BAD_REQUEST.value(),
-                error = HttpStatus.BAD_REQUEST.reasonPhrase,
-                message = ex.message ?: "Invalid IBAN",
-                path = request.requestURI
-            )
-        )
+    fun handleInvalidIban(ex: InvalidIbanException, request: HttpServletRequest) =
+        error(HttpStatus.BAD_REQUEST, ex.message ?: "Invalid IBAN", request)
 
     @ExceptionHandler(UnauthorizedOperationException::class)
-    fun handleUnauthorizedOperation(
-        ex: UnauthorizedOperationException,
-        request:HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.FORBIDDEN).body(
-            ErrorResponse(
-                status = HttpStatus.FORBIDDEN.value(),
-                error = HttpStatus.FORBIDDEN.reasonPhrase,
-                message = ex.message ?: "You do not have permission to perform this operation",
-                path = request.requestURI
-            )
-        )
+    fun handleUnauthorizedOperation(ex: UnauthorizedOperationException, request: HttpServletRequest) =
+        error(HttpStatus.FORBIDDEN, ex.message ?: "You do not have permission to perform this operation", request)
 
     @ExceptionHandler(MethodArgumentNotValidException::class)
-    fun handleValidationErrors(
-        ex: MethodArgumentNotValidException,
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> {
-        val fieldViolations = ex.bindingResult.fieldErrors.map { error ->
-            FieldViolation(
-                field = error.field,
-                message = error.defaultMessage ?: "Invalid value"
-            )
-        }
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-            ErrorResponse(
-                status = HttpStatus.BAD_REQUEST.value(),
-                error = HttpStatus.BAD_REQUEST.reasonPhrase,
-                message = "Validation failed",
-                path = request.requestURI,
-                fields = fieldViolations
-            )
-        )
+    fun handleValidationErrors(ex: MethodArgumentNotValidException, request: HttpServletRequest): ResponseEntity<ErrorResponse> {
+        val fieldViolations = ex.bindingResult.fieldErrors.map { FieldViolation(it.field, it.defaultMessage ?: "Invalid value") }
+        return error(HttpStatus.BAD_REQUEST, "Validation failed", request, fieldViolations)
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException::class)
-    fun handleTypeMismatch(
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> = ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-        ErrorResponse(
-            status = HttpStatus.BAD_REQUEST.value(),
-            error = HttpStatus.BAD_REQUEST.reasonPhrase,
-            message = "Invalid type for request parameter",
-            path = request.requestURI
-        )
-    )
+    fun handleTypeMismatch(ex: MethodArgumentTypeMismatchException, request: HttpServletRequest) =
+        error(HttpStatus.BAD_REQUEST, "Invalid type for request parameter", request)
 
     @ExceptionHandler(HttpMessageNotReadableException::class)
-    fun handleUnreadableMessage(
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-            ErrorResponse(
-                status = HttpStatus.BAD_REQUEST.value(),
-                error = HttpStatus.BAD_REQUEST.reasonPhrase,
-                message = "Malformed or unreadable request body",
-                path = request.requestURI
-            )
-        )
+    fun handleUnreadableMessage(ex: HttpMessageNotReadableException, request: HttpServletRequest) =
+        error(HttpStatus.BAD_REQUEST, "Malformed or unreadable request body", request)
 
     @ExceptionHandler(NoSuchElementException::class)
-    fun handleNotFound(
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.NOT_FOUND).body(
-            ErrorResponse(
-                status = HttpStatus.NOT_FOUND.value(),
-                error = HttpStatus.NOT_FOUND.reasonPhrase,
-                message = "Resource not found",
-                path = request.requestURI
-            )
-        )
+    fun handleNotFound(ex: NoSuchElementException, request: HttpServletRequest) =
+        error(HttpStatus.NOT_FOUND, "Resource not found", request)
 
     @ExceptionHandler(IllegalArgumentException::class)
-    fun handleBadRequest(
-        ex: IllegalArgumentException,
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-            ErrorResponse(
-                status = HttpStatus.BAD_REQUEST.value(),
-                error = HttpStatus.BAD_REQUEST.reasonPhrase,
-                message = ex.message ?: "Bad request",
-                path = request.requestURI
-            )
-        )
+    fun handleBadRequest(ex: IllegalArgumentException, request: HttpServletRequest) =
+        error(HttpStatus.BAD_REQUEST, ex.message ?: "Bad request", request)
 
     @ExceptionHandler(EntityNotFoundException::class)
-    fun handleEntityNotFound(
-        ex: EntityNotFoundException,
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.NOT_FOUND).body(
-            ErrorResponse(
-                status = HttpStatus.NOT_FOUND.value(),
-                error = HttpStatus.NOT_FOUND.reasonPhrase,
-                message = ex.message ?: "Entity not found",
-                path = request.requestURI
-            )
-        )
+    fun handleEntityNotFound(ex: EntityNotFoundException, request: HttpServletRequest) =
+        error(HttpStatus.NOT_FOUND, ex.message ?: "Entity not found", request)
+
+    @ExceptionHandler(MissingRequestHeaderException::class)
+    fun handleMissingHeader(ex: MissingRequestHeaderException, request: HttpServletRequest) =
+        error(HttpStatus.BAD_REQUEST, "Required header '${ex.headerName}' is missing", request)
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException::class)
-    fun handleOptimisticLockingFailure(
-        ex: ObjectOptimisticLockingFailureException,
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-            .header("Retry-After", "1")
-            .body(
-                ErrorResponse(
-                    status = HttpStatus.SERVICE_UNAVAILABLE.value(),
-                    error = HttpStatus.SERVICE_UNAVAILABLE.reasonPhrase,
-                    message = ex.message ?: "Service temporarily unavailable. Please try again later.",
-                    path = request.requestURI
-                )
-            )
+    fun handleOptimisticLockingFailure(ex: ObjectOptimisticLockingFailureException, request: HttpServletRequest) =
+        error(HttpStatus.SERVICE_UNAVAILABLE, ex.message ?: "Service temporarily unavailable. Please try again later.", request)
+            .also { it.headers.set("Retry-After", "1") }
 
     @ExceptionHandler(Exception::class)
-    fun handleException(
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+    fun handleException(ex: Exception, request: HttpServletRequest) {
+        logger.error("Unhandled exception on ${request.method} ${request.requestURI}", ex)
+        error(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred. Please try again later.", request)
+//         error(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred. Please try again later.", request)
+    }
+
+
+    private fun error(status: HttpStatus, message: String, request: HttpServletRequest, fields: List<FieldViolation>? = null) =
+        ResponseEntity.status(status).body(
             ErrorResponse(
-                status = HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                error = HttpStatus.INTERNAL_SERVER_ERROR.reasonPhrase,
-                message = "An unexpected error occurred. Please try again later.",
-                path = request.requestURI
+                status = status.value(),
+                error = status.reasonPhrase,
+                message = message,
+                path = request.requestURI,
+                fields = fields
             )
         )
 }

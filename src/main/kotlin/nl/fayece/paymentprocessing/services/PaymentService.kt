@@ -14,8 +14,8 @@ import nl.fayece.paymentprocessing.repositories.TransactionRepository
 import nl.fayece.paymentprocessing.repositories.TransactionStatusHistoryRepository
 import org.springframework.orm.ObjectOptimisticLockingFailureException
 import org.springframework.resilience.annotation.Retryable
-import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.util.Currency
@@ -25,7 +25,8 @@ import java.util.UUID
 class PaymentService (
     private val accountRepository: AccountRepository,
     private val transactionRepository: TransactionRepository,
-    private val statusHistoryRepository: TransactionStatusHistoryRepository
+    private val statusHistoryRepository: TransactionStatusHistoryRepository,
+    private val transactionHistoryWriter: TransactionHistoryWriter
 ) {
     @Retryable(
         includes = [ObjectOptimisticLockingFailureException::class],
@@ -172,7 +173,8 @@ class PaymentService (
         } catch (e: Exception) {
             if (e is ObjectOptimisticLockingFailureException) throw e
 
-            transition(transaction, TransactionStatus.FAILED, e.message)
+            transaction.transitionTo(TransactionStatus.FAILED)
+            transactionHistoryWriter.recordFailure(transaction, e.message)
             throw e
         }
 
